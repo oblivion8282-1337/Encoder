@@ -66,9 +66,13 @@ impl Job {
             .unwrap_or_default()
             .to_string_lossy();
 
-        let (suffix, ext) = match self.mode {
-            JobMode::Proxy => ("_proxy", "mov"),
-            JobMode::ReWrap => ("_rewrap", "mov"),
+        let suffix = match self.mode {
+            JobMode::Proxy  => "_proxy",
+            JobMode::ReWrap => "_rewrap",
+        };
+        let ext = match self.mode {
+            JobMode::ReWrap => "mov",
+            JobMode::Proxy  => if self.options.proxy_codec == "av1" { "mp4" } else { "mov" },
         };
 
         self.output_dir.join(format!("{stem}{suffix}.{ext}"))

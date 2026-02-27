@@ -43,7 +43,7 @@ fn normalize_resolution(res: &str) -> String {
 ///
 /// Argument-Reihenfolge ist kritisch:
 /// 1. -y (overwrite)
-/// 2. HW-Accel Flags VOR -i (vaapi_device fuer VAAPI)
+/// 2. HW-Accel Flags VOR -i (VAAPI-Device / CUDA-hwaccel)
 /// 3. -loglevel warning
 /// 4. -i INPUT
 /// 5. Mapping + Codec-Optionen
@@ -60,18 +60,17 @@ pub fn build_ffmpeg_args(
     // Overwrite ohne Nachfrage
     args.push("-y".to_string());
 
-    // HW-Accel Flags VOR -i (nur bei Proxy)
-    if matches!(mode, JobMode::Proxy) {
+    // HW-Accel Flags VOR -i (nur Proxy, nicht ProRes – ProRes ist immer CPU)
+    if matches!(mode, JobMode::Proxy) && !is_prores(&options.proxy_codec) {
         match options.hw_accel.as_str() {
             "vaapi" => {
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
             "nvenc" => {
-                // CUDA-Decode: Frames in CUDA-Memory halten wenn skaliert wird,
-                // damit scale_cuda direkt auf GPU arbeiten kann.
                 args.push("-hwaccel".to_string());
                 args.push("cuda".to_string());
+                // Frames in CUDA-Memory halten wenn skaliert → scale_cuda moeglich
                 if options.proxy_resolution.is_some() {
                     args.push("-hwaccel_output_format".to_string());
                     args.push("cuda".to_string());
@@ -96,10 +95,9 @@ pub fn build_ffmpeg_args(
     args.push("0:a".to_string());
 
     // Globale Metadaten uebernehmen (Timecode etc. auf Container-Ebene)
+    // Hinweis: -map 0:d? entfernt – Sony FX MXF hat smpte_436m_anc (nicht MOV-kompatibel)
     args.push("-map_metadata".to_string());
     args.push("0".to_string());
-    // Hinweis: -map 0:d? wurde entfernt – Sony FX MXF enthaelt smpte_436m_anc
-    // als Data-Track, den der MOV-Container nicht unterstuetzt.
 
     // Modus-spezifische Codecs
     match mode {
@@ -110,60 +108,11 @@ pub fn build_ffmpeg_args(
             args.push(options.audio_codec.clone());
         }
         JobMode::Proxy => {
-            match options.hw_accel.as_str() {
-                "vaapi" => {
-                    args.push("-c:v".to_string());
-                    args.push("h264_vaapi".to_string());
-                    args.push("-rc_mode".to_string());
-                    args.push("CQP".to_string());
-                    args.push("-qp".to_string());
-                    args.push("23".to_string());
-
-                    // VAAPI braucht format=nv12,hwupload; Skalierung via scale_vaapi
-                    args.push("-vf".to_string());
-                    if let Some(ref resolution) = options.proxy_resolution {
-                        let res = normalize_resolution(resolution);
-                        args.push(format!("format=nv12,hwupload,scale_vaapi={res}"));
-                    } else {
-                        args.push("format=nv12,hwupload".to_string());
-                    }
-                }
-                "nvenc" => {
-                    args.push("-c:v".to_string());
-                    args.push("h264_nvenc".to_string());
-                    args.push("-preset".to_string());
-                    args.push("p4".to_string());
-                    args.push("-rc".to_string());
-                    args.push("constqp".to_string());
-                    args.push("-qp".to_string());
-                    args.push("23".to_string());
-
-                    // scale_cuda arbeitet direkt auf CUDA-Frames (GPU-seitig)
-                    if let Some(ref resolution) = options.proxy_resolution {
-                        let res = normalize_resolution(resolution);
-                        args.push("-vf".to_string());
-                        args.push(format!("scale_cuda={res}"));
-                    }
-                }
-                _ => {
-                    // Software encoding (libx264)
-                    args.push("-c:v".to_string());
-                    args.push("libx264".to_string());
-                    args.push("-crf".to_string());
-                    args.push("23".to_string());
-                    args.push("-preset".to_string());
-                    args.push("fast".to_string());
-                    args.push("-pix_fmt".to_string());
-                    args.push("yuv420p".to_string());
-
-                    // Skalierung falls gewuenscht
-                    if let Some(ref resolution) = options.proxy_resolution {
-                        let res = normalize_resolution(resolution);
-                        args.push("-vf".to_string());
-                        args.push(format!("scale={res}"));
-                    }
-                }
-            }
+            let res = options
+                .proxy_resolution
+                .as_deref()
+                .map(normalize_resolution);
+            push_proxy_codec_args(&mut args, &options.proxy_codec, &options.hw_accel, res.as_deref());
 
             // Audio bei Proxy: pcm_s16le
             args.push("-c:a".to_string());
@@ -179,6 +128,149 @@ pub fn build_ffmpeg_args(
     args.push(output_path.to_string_lossy().to_string());
 
     args
+}
+
+// ---------------------------------------------------------------------------
+// Codec-Hilfsfunktionen
+// ---------------------------------------------------------------------------
+
+fn is_prores(codec: &str) -> bool {
+    matches!(codec, "prores_proxy" | "prores_lt" | "prores_422" | "prores_hq")
+}
+
+/// Waehlt den passenden Video-Encoder anhand von proxy_codec × hw_accel.
+fn push_proxy_codec_args(
+    args: &mut Vec<String>,
+    proxy_codec: &str,
+    hw_accel: &str,
+    resolution: Option<&str>,
+) {
+    match proxy_codec {
+        // ── H.264 ──────────────────────────────────────────────────────────
+        "h264" => match hw_accel {
+            "vaapi" => push_vaapi(args, "h264_vaapi", resolution),
+            "nvenc" => push_nvenc(args, "h264_nvenc", "23", resolution),
+            _       => push_sw_x264(args, resolution),
+        },
+        // ── H.265 / HEVC ───────────────────────────────────────────────────
+        "h265" => match hw_accel {
+            "vaapi" => push_vaapi(args, "hevc_vaapi", resolution),
+            "nvenc" => push_nvenc(args, "hevc_nvenc", "23", resolution),
+            _       => push_sw_x265(args, resolution),
+        },
+        // ── AV1 ────────────────────────────────────────────────────────────
+        "av1" => match hw_accel {
+            "vaapi" => push_vaapi(args, "av1_vaapi", resolution),
+            "nvenc" => push_nvenc(args, "av1_nvenc", "63", resolution), // AV1 QP-Skala 0-255
+            _       => push_sw_av1(args, resolution),
+        },
+        // ── ProRes ─────────────────────────────────────────────────────────
+        c if is_prores(c) => push_prores(args, c, resolution),
+        // ── Fallback: libx264 ──────────────────────────────────────────────
+        _ => push_sw_x264(args, resolution),
+    }
+}
+
+/// VAAPI-Encoder (h264_vaapi / hevc_vaapi / av1_vaapi).
+/// Benoetigt format=nv12,hwupload fuer den Video-Filter.
+fn push_vaapi(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
+    args.push("-c:v".to_string());
+    args.push(codec.to_string());
+    args.push("-rc_mode".to_string());
+    args.push("CQP".to_string());
+    args.push("-qp".to_string());
+    args.push("23".to_string());
+    args.push("-vf".to_string());
+    match resolution {
+        Some(res) => args.push(format!("format=nv12,hwupload,scale_vaapi={res}")),
+        None      => args.push("format=nv12,hwupload".to_string()),
+    }
+}
+
+/// NVENC-Encoder (h264_nvenc / hevc_nvenc / av1_nvenc).
+/// scale_cuda fuer GPU-seitige Skalierung (Frames bleiben in CUDA-Memory).
+fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<&str>) {
+    args.push("-c:v".to_string());
+    args.push(codec.to_string());
+    args.push("-preset".to_string());
+    args.push("p4".to_string());
+    args.push("-rc".to_string());
+    args.push("constqp".to_string());
+    args.push("-qp".to_string());
+    args.push(qp.to_string());
+    if let Some(res) = resolution {
+        args.push("-vf".to_string());
+        args.push(format!("scale_cuda={res}"));
+    }
+}
+
+/// Software H.264 (libx264).
+fn push_sw_x264(args: &mut Vec<String>, resolution: Option<&str>) {
+    args.push("-c:v".to_string());
+    args.push("libx264".to_string());
+    args.push("-crf".to_string());
+    args.push("23".to_string());
+    args.push("-preset".to_string());
+    args.push("fast".to_string());
+    args.push("-pix_fmt".to_string());
+    args.push("yuv420p".to_string());
+    if let Some(res) = resolution {
+        args.push("-vf".to_string());
+        args.push(format!("scale={res}"));
+    }
+}
+
+/// Software H.265 (libx265).
+fn push_sw_x265(args: &mut Vec<String>, resolution: Option<&str>) {
+    args.push("-c:v".to_string());
+    args.push("libx265".to_string());
+    args.push("-crf".to_string());
+    args.push("23".to_string());
+    args.push("-preset".to_string());
+    args.push("fast".to_string());
+    args.push("-pix_fmt".to_string());
+    args.push("yuv420p".to_string());
+    if let Some(res) = resolution {
+        args.push("-vf".to_string());
+        args.push(format!("scale={res}"));
+    }
+}
+
+/// Software AV1 (libsvtav1 – schnellster freier AV1-Encoder).
+fn push_sw_av1(args: &mut Vec<String>, resolution: Option<&str>) {
+    args.push("-c:v".to_string());
+    args.push("libsvtav1".to_string());
+    args.push("-crf".to_string());
+    args.push("30".to_string());
+    args.push("-preset".to_string());
+    args.push("8".to_string());
+    args.push("-pix_fmt".to_string());
+    args.push("yuv420p".to_string());
+    if let Some(res) = resolution {
+        args.push("-vf".to_string());
+        args.push(format!("scale={res}"));
+    }
+}
+
+/// Apple ProRes (prores_ks) – immer CPU, profile bestimmt Qualitaetsstufe.
+fn push_prores(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
+    let profile = match codec {
+        "prores_proxy" => "0",
+        "prores_lt"    => "1",
+        "prores_422"   => "2",
+        "prores_hq"    => "3",
+        _              => "2",
+    };
+    args.push("-c:v".to_string());
+    args.push("prores_ks".to_string());
+    args.push("-profile:v".to_string());
+    args.push(profile.to_string());
+    args.push("-pix_fmt".to_string());
+    args.push("yuv422p10le".to_string());
+    if let Some(res) = resolution {
+        args.push("-vf".to_string());
+        args.push(format!("scale={res}"));
+    }
 }
 
 /// Startet einen FFmpeg-Prozess und sendet Events ueber den Channel.

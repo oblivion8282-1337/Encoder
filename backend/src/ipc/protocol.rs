@@ -45,8 +45,7 @@ pub struct JobOptions {
 
     pub proxy_resolution: Option<String>,
 
-    // TODO: proxy_codec wird aktuell in build_ffmpeg_args() ignoriert — der Codec
-    // wird implizit durch hw_accel bestimmt (vaapi→h264_vaapi, nvenc→h264_nvenc, none→libx264).
+    // Werte: "h264" | "h265" | "av1" | "prores_proxy" | "prores_lt" | "prores_422" | "prores_hq"
     #[serde(default = "default_proxy_codec")]
     pub proxy_codec: String,
 

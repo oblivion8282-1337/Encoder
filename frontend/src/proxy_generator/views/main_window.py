@@ -186,7 +186,11 @@ class MainWindow(QMainWindow):
 
         pl.addWidget(QLabel("Codec:"))
         self._combo_codec = QComboBox()
-        self._combo_codec.addItems(["H.264"])
+        self._combo_codec.addItems([
+            "H.264", "H.265", "AV1",
+            "ProRes 422 Proxy", "ProRes 422 LT", "ProRes 422", "ProRes 422 HQ",
+        ])
+        self._combo_codec.currentTextChanged.connect(self._on_codec_changed)
         pl.addWidget(self._combo_codec)
 
         layout.addWidget(self._grp_proxy)
@@ -274,6 +278,14 @@ class MainWindow(QMainWindow):
         if folder:
             self._output_dir_edit.setText(folder)
 
+    def _on_codec_changed(self, text: str) -> None:
+        is_prores = text.startswith("ProRes")
+        self._combo_hw.setEnabled(not is_prores)
+        if is_prores:
+            self._combo_hw.setToolTip("ProRes wird immer per CPU enkodiert.")
+        else:
+            self._combo_hw.setToolTip("")
+
     def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
             if button_id == -1:
@@ -327,7 +339,15 @@ class MainWindow(QMainWindow):
         if resolution_text != "Beibehalten":
             proxy_resolution = resolution_text
 
-        codec_map = {"H.264": "h264"}
+        codec_map = {
+            "H.264": "h264",
+            "H.265": "h265",
+            "AV1": "av1",
+            "ProRes 422 Proxy": "prores_proxy",
+            "ProRes 422 LT": "prores_lt",
+            "ProRes 422": "prores_422",
+            "ProRes 422 HQ": "prores_hq",
+        }
         proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
 
         hw_map = {"Keins": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}
