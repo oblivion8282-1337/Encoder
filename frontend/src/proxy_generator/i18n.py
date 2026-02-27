@@ -57,7 +57,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "placeholder.output": {"de": "Ausgabe-Ordner wählen...", "en": "Choose output folder..."},
     "lbl.resolution":     {"de": "Auflösung:",               "en": "Resolution:"},
     "lbl.codec":          {"de": "Codec:",                   "en": "Codec:"},
-    "rb.rewrap":          {"de": "Re-Wrap (nur Container)",  "en": "Re-Wrap (container only)"},
+    "rb.rewrap":          {"de": "Re-Wrap (Audio umkodieren)", "en": "Re-Wrap (transcode audio)"},
     "rb.proxy":           {"de": "Proxy (Transkodierung)",   "en": "Proxy (transcode)"},
     "tooltip.prores_cpu": {"de": "ProRes wird immer per CPU enkodiert.",
                            "en": "ProRes is always encoded on CPU."},
