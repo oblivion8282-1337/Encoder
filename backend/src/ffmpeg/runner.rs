@@ -202,6 +202,8 @@ pub async fn run_ffmpeg(
 
     let mut reader = BufReader::new(stderr).lines();
     let mut parser = ProgressParser::new();
+    // Letzte Zeilen aus FFmpeg-stderr fuer Fehlermeldungen (max. 20)
+    let mut log_tail: Vec<String> = Vec::with_capacity(20);
 
     loop {
         tokio::select! {
@@ -234,9 +236,9 @@ pub async fn run_ffmpeg(
                                     let _ = tx
                                         .send(FfmpegEvent::Error {
                                             id: job_id.clone(),
-                                            message: format!(
-                                                "FFmpeg beendet mit Exit-Code: {}",
-                                                status.code().unwrap_or(-1)
+                                            message: build_error_message(
+                                                status.code().unwrap_or(-1),
+                                                &log_tail,
                                             ),
                                         })
                                         .await;
@@ -258,6 +260,12 @@ pub async fn run_ffmpeg(
                                     frame: progress.frame,
                                 })
                                 .await;
+                        } else {
+                            // Keine Progress-Zeile → FFmpeg-Lognachricht puffern
+                            if log_tail.len() == 20 {
+                                log_tail.remove(0);
+                            }
+                            log_tail.push(line);
                         }
                     }
                     Ok(None) => {
@@ -271,9 +279,9 @@ pub async fn run_ffmpeg(
                             let _ = tx
                                 .send(FfmpegEvent::Error {
                                     id: job_id.clone(),
-                                    message: format!(
-                                        "FFmpeg beendet mit Exit-Code: {}",
-                                        status.code().unwrap_or(-1)
+                                    message: build_error_message(
+                                        status.code().unwrap_or(-1),
+                                        &log_tail,
                                     ),
                                 })
                                 .await;
@@ -295,4 +303,15 @@ pub async fn run_ffmpeg(
             }
         }
     }
+}
+
+/// Baut eine lesbare Fehlermeldung mit FFmpeg-Logausgabe.
+fn build_error_message(exit_code: i32, log_tail: &[String]) -> String {
+    if log_tail.is_empty() {
+        return format!("FFmpeg beendet mit Exit-Code: {exit_code}");
+    }
+    format!(
+        "FFmpeg beendet mit Exit-Code: {exit_code}\n\n{}",
+        log_tail.join("\n")
+    )
 }
