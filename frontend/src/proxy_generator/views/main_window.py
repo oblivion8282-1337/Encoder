@@ -249,9 +249,13 @@ class MainWindow(QMainWindow):
     def _on_start_all(self) -> None:
         if self._vm is None:
             return
+        if not self._vm.jobs:
+            QMessageBox.information(self, "Queue leer",
+                "Bitte zuerst Dateien ueber 'Dateien hinzufuegen' hinzufuegen.")
+            return
         # Worker is already started by the app on startup.
         # Jobs are sent to the backend immediately when added.
-        self._statusbar.showMessage("Jobs werden automatisch verarbeitet.", 3000)
+        self._statusbar.showMessage("Jobs werden verarbeitet...", 3000)
 
     def _on_clear_done(self) -> None:
         if self._vm is None:
@@ -324,8 +328,18 @@ class MainWindow(QMainWindow):
             hw_accel=hw_accel,
         )
 
-        self._vm.set_parallel_jobs(self._spin_parallel.value())
+        # TODO: Backend unterstuetzt set_parallel_jobs noch nicht (kein Request-Typ in protocol.rs).
+        # self._vm.set_parallel_jobs(self._spin_parallel.value())
+        count_before = len(self._vm.jobs)
         self._vm.add_files(paths, output_dir, mode, options)
+        count_after = len(self._vm.jobs)
+        added = count_after - count_before
+        if added == 0 and paths:
+            QMessageBox.warning(self, "Fehler",
+                "Keine Jobs konnten hinzugefuegt werden.\nPruefen Sie ob das Backend laeuft.")
+        elif added < len(paths):
+            self._statusbar.showMessage(
+                f"{added} von {len(paths)} Jobs hinzugefuegt.", 5000)
 
     # -- table management -------------------------------------------------------
 

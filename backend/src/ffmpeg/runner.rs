@@ -34,6 +34,15 @@ pub enum FfmpegEvent {
 }
 
 /// Baut die FFmpeg-Argumente fuer den gegebenen Modus zusammen.
+///
+/// Argument-Reihenfolge ist kritisch:
+/// 1. -y (overwrite)
+/// 2. HW-Accel Flags VOR -i (vaapi_device, hwaccel cuda)
+/// 3. -loglevel warning
+/// 4. -i INPUT
+/// 5. Mapping + Codec-Optionen
+/// 6. -progress pipe:2
+/// 7. OUTPUT
 pub fn build_ffmpeg_args(
     input_path: &Path,
     output_path: &Path,
@@ -44,6 +53,25 @@ pub fn build_ffmpeg_args(
 
     // Overwrite ohne Nachfrage
     args.push("-y".to_string());
+
+    // HW-Accel Flags VOR -i (nur bei Proxy)
+    if matches!(mode, JobMode::Proxy) {
+        match options.hw_accel.as_str() {
+            "vaapi" => {
+                args.push("-vaapi_device".to_string());
+                args.push("/dev/dri/renderD128".to_string());
+            }
+            "nvenc" => {
+                args.push("-hwaccel".to_string());
+                args.push("cuda".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    // Weniger stderr-Noise
+    args.push("-loglevel".to_string());
+    args.push("warning".to_string());
 
     // Input
     args.push("-i".to_string());
@@ -70,25 +98,54 @@ pub fn build_ffmpeg_args(
             args.push(options.audio_codec.clone());
         }
         JobMode::Proxy => {
-            // Video-Codec je nach HW-Accel
-            args.push("-c:v".to_string());
             match options.hw_accel.as_str() {
-                "nvenc" => args.push("h264_nvenc".to_string()),
-                "vaapi" => args.push("h264_vaapi".to_string()),
+                "vaapi" => {
+                    args.push("-c:v".to_string());
+                    args.push("h264_vaapi".to_string());
+                    args.push("-qp".to_string());
+                    args.push("23".to_string());
+
+                    // VAAPI braucht format=nv12,hwupload; Skalierung via scale_vaapi
+                    args.push("-vf".to_string());
+                    if let Some(ref resolution) = options.proxy_resolution {
+                        args.push(format!("format=nv12,hwupload,scale_vaapi={resolution}"));
+                    } else {
+                        args.push("format=nv12,hwupload".to_string());
+                    }
+                }
+                "nvenc" => {
+                    args.push("-c:v".to_string());
+                    args.push("h264_nvenc".to_string());
+                    args.push("-preset".to_string());
+                    args.push("p4".to_string());
+                    args.push("-rc".to_string());
+                    args.push("constqp".to_string());
+                    args.push("-qp".to_string());
+                    args.push("23".to_string());
+
+                    // Skalierung falls gewuenscht (normaler scale-Filter)
+                    if let Some(ref resolution) = options.proxy_resolution {
+                        args.push("-vf".to_string());
+                        args.push(format!("scale={resolution}"));
+                    }
+                }
                 _ => {
-                    // Software encoding
+                    // Software encoding (libx264)
+                    args.push("-c:v".to_string());
                     args.push("libx264".to_string());
                     args.push("-crf".to_string());
                     args.push("23".to_string());
                     args.push("-preset".to_string());
                     args.push("fast".to_string());
-                }
-            }
+                    args.push("-pix_fmt".to_string());
+                    args.push("yuv420p".to_string());
 
-            // Skalierung falls gewuenscht
-            if let Some(ref resolution) = options.proxy_resolution {
-                args.push("-vf".to_string());
-                args.push(format!("scale={resolution}"));
+                    // Skalierung falls gewuenscht
+                    if let Some(ref resolution) = options.proxy_resolution {
+                        args.push("-vf".to_string());
+                        args.push(format!("scale={resolution}"));
+                    }
+                }
             }
 
             // Audio bei Proxy: pcm_s16le

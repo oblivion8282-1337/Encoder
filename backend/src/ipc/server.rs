@@ -42,14 +42,24 @@ pub async fn read_stdin(
                 mode,
                 options,
             } => {
+                let job_id = id.clone();
                 let job = Job::new(id, input_path, output_dir, mode, options);
                 if let Err(e) = queue.add_job(job).await {
                     eprintln!("Fehler beim Hinzufuegen des Jobs: {e}");
+                    let _ = response_tx.send(Response::JobError {
+                        id: job_id,
+                        message: format!("Job konnte nicht hinzugefuegt werden: {e}"),
+                    }).await;
                 }
             }
             Request::CancelJob { id } => {
+                let cancel_id = id.clone();
                 if let Err(e) = queue.cancel_job(id).await {
                     eprintln!("Fehler beim Abbrechen des Jobs: {e}");
+                    let _ = response_tx.send(Response::JobError {
+                        id: cancel_id,
+                        message: format!("Job konnte nicht abgebrochen werden: {e}"),
+                    }).await;
                 }
             }
             Request::GetStatus => {

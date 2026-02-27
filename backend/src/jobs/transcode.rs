@@ -74,7 +74,7 @@ impl Job {
             .to_string_lossy();
 
         let (suffix, ext) = match self.mode {
-            JobMode::Proxy => ("_proxy", "mp4"),
+            JobMode::Proxy => ("_proxy", "mov"),
             JobMode::ReWrap => ("_rewrap", "mov"),
         };
 
@@ -210,13 +210,15 @@ pub async fn run_queue(
                 let input_path_clone = job.input_path.clone();
                 let total_duration_us = match probe_duration(&input_path_clone).await {
                     Ok(d) if d > 0 => d,
-                    Ok(_) => {
-                        eprintln!("Warnung: ffprobe lieferte Dauer 0 fuer {:?}", input_path_clone);
-                        0
-                    }
-                    Err(e) => {
-                        eprintln!("Warnung: ffprobe fehlgeschlagen fuer {:?}: {e}", input_path_clone);
-                        0
+                    Ok(_) | Err(_) => {
+                        let _ = response_tx
+                            .send(Response::JobError {
+                                id: job_id.clone(),
+                                message: "Quelldatei konnte nicht gelesen werden (ffprobe fehlgeschlagen)".to_string(),
+                            })
+                            .await;
+                        jobs.lock().await.remove(&job_id);
+                        continue;
                     }
                 };
 
@@ -240,7 +242,11 @@ pub async fn run_queue(
                     let _permit = match sem.acquire().await {
                         Ok(p) => p,
                         Err(_) => {
-                            eprintln!("Semaphore geschlossen, Job {job_id} kann nicht starten");
+                            let _ = resp_tx.send(Response::JobError {
+                                id: job_id.clone(),
+                                message: "Semaphore geschlossen, Job kann nicht starten".to_string(),
+                            }).await;
+                            jobs_ref.lock().await.remove(&job_id);
                             return;
                         }
                     };
@@ -340,7 +346,11 @@ pub async fn run_queue(
                 }
             }
             JobCommand::GetStatus(reply) => {
-                let map = jobs.lock().await;
+                let mut map = jobs.lock().await;
+                // Alte abgeschlossene Jobs entfernen
+                map.retain(|_, job| {
+                    matches!(job.status, JobState::Running | JobState::Queued)
+                });
                 let statuses: Vec<JobStatus> = map.values().map(|j| j.to_status()).collect();
                 let _ = reply.send(statuses);
             }
