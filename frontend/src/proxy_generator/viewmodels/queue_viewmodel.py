@@ -105,7 +105,10 @@ class QueueViewModel(QObject):
         if job_id in self._jobs:
             job = self._jobs[job_id]
             if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
-                self._client.cancel_job(job_id)
+                try:
+                    self._client.cancel_job(job_id)
+                except (RuntimeError, BrokenPipeError, OSError) as e:
+                    log.error("Failed to cancel job %s during remove: %s", job_id, e)
             del self._jobs[job_id]
             self._order = [jid for jid in self._order if jid != job_id]
             self.jobs_changed.emit()
@@ -113,7 +116,7 @@ class QueueViewModel(QObject):
     def clear_all(self) -> None:
         """Alle Jobs aus der Queue entfernen (auch laufende werden abgebrochen)."""
         for job_id in list(self._jobs.keys()):
-            if self._jobs[job_id].status == JobStatus.RUNNING:
+            if self._jobs[job_id].status in (JobStatus.RUNNING, JobStatus.QUEUED):
                 try:
                     self._client.cancel_job(job_id)
                 except Exception:

@@ -15,15 +15,8 @@ use crate::ipc::protocol::{JobMode, JobOptions, JobState, JobStatus, Response};
 /// Validiert einen Pfad gegen Path-Traversal-Angriffe.
 /// Stellt sicher, dass der kanonische Pfad nicht ausserhalb erlaubter Bereiche liegt.
 fn validate_path(p: &Path) -> Result<PathBuf> {
-    let path = p
-        .canonicalize()
-        .map_err(|e| anyhow::anyhow!("Ungueltiger Pfad {:?}: {e}", p))?;
-    // Verweigere offensichtliche Traversal-Versuche
-    let path_str = path.to_string_lossy();
-    if path_str.contains("..") {
-        return Err(anyhow::anyhow!("Path-Traversal erkannt in: {:?}", p));
-    }
-    Ok(path)
+    p.canonicalize()
+        .map_err(|e| anyhow::anyhow!("Ungueltiger Pfad {:?}: {e}", p))
 }
 
 /// Ein einzelner Transcode-Auftrag.
@@ -239,15 +232,25 @@ pub async fn run_queue(
                 let job_id_for_monitor = job_id.clone();
 
                 let handle = tokio::spawn(async move {
-                    // Warten bis ein Slot frei ist
-                    let _permit = match sem.acquire().await {
-                        Ok(p) => p,
-                        Err(_) => {
-                            let _ = resp_tx.send(Response::JobError {
-                                id: job_id.clone(),
-                                message: "Semaphore geschlossen, Job kann nicht starten".to_string(),
-                            }).await;
+                    // Warten bis ein Slot frei ist – oder Job wird gecancelt
+                    let _permit = tokio::select! {
+                        result = sem.acquire() => {
+                            match result {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    let _ = resp_tx.send(Response::JobError {
+                                        id: job_id.clone(),
+                                        message: "Semaphore geschlossen, Job kann nicht starten".to_string(),
+                                    }).await;
+                                    jobs_ref.write().await.remove(&job_id);
+                                    return;
+                                }
+                            }
+                        }
+                        _ = cancel_token.cancelled() => {
+                            // Job wurde gecancelt bevor er starten konnte
                             jobs_ref.write().await.remove(&job_id);
+                            let _ = resp_tx.send(Response::JobCancelled { id: job_id.clone() }).await;
                             return;
                         }
                     };

@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
 
         pl.addWidget(QLabel("Codec:"))
         self._combo_codec = QComboBox()
-        self._combo_codec.addItems(["H.264", "DNxHR"])
+        self._combo_codec.addItems(["H.264"])
         pl.addWidget(self._combo_codec)
 
         layout.addWidget(self._grp_proxy)
@@ -329,7 +329,7 @@ class MainWindow(QMainWindow):
         if resolution_text != "Beibehalten":
             proxy_resolution = resolution_text
 
-        codec_map = {"H.264": "h264", "DNxHR": "dnxhr"}
+        codec_map = {"H.264": "h264"}
         proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
 
         hw_map = {"Keins": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}

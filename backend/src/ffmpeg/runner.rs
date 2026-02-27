@@ -67,10 +67,8 @@ pub fn build_ffmpeg_args(
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
-            "nvenc" => {
-                args.push("-hwaccel".to_string());
-                args.push("cuda".to_string());
-            }
+            "nvenc" => {}
+
             _ => {}
         }
     }
@@ -284,6 +282,7 @@ pub async fn run_ffmpeg(
                     }
                     Err(e) => {
                         let _ = child.kill().await;
+                        let _ = child.wait().await;  // Zombie verhindern
                         let _ = tx
                             .send(FfmpegEvent::Error {
                                 id: job_id.clone(),
