@@ -204,8 +204,13 @@ class MainWindow(QMainWindow):
         nl.addWidget(self._edit_suffix)
         self._lbl_subfolder = QLabel("")
         nl.addWidget(self._lbl_subfolder)
+        subfolder_row = QHBoxLayout()
         self._edit_subfolder = QLineEdit()
-        nl.addWidget(self._edit_subfolder)
+        subfolder_row.addWidget(self._edit_subfolder)
+        self._btn_subfolder = QPushButton("")
+        self._btn_subfolder.clicked.connect(self._on_browse_subfolder)
+        subfolder_row.addWidget(self._btn_subfolder)
+        nl.addLayout(subfolder_row)
         layout.addWidget(self._grp_naming)
 
         # -- Hardware encoding --------------------------------------------------
@@ -283,6 +288,7 @@ class MainWindow(QMainWindow):
         self._edit_suffix.setPlaceholderText(tr("placeholder.suffix"))
         self._lbl_subfolder.setText(tr("lbl.subfolder"))
         self._edit_subfolder.setPlaceholderText(tr("placeholder.subfolder"))
+        self._btn_subfolder.setText(tr("btn.browse"))
         self._grp_hw.setTitle(tr("grp.hw"))
         self._grp_par.setTitle(tr("grp.parallel"))
         self._grp_lang.setTitle(tr("grp.lang"))
@@ -375,6 +381,13 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, tr("fdlg.output_folder"))
         if folder:
             self._output_dir_edit.setText(folder)
+
+    def _on_browse_subfolder(self) -> None:
+        # Dialog startet im aktuellen Ausgabe-Ordner (falls vorhanden)
+        start = self._output_dir_edit.text().strip() or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(self, tr("fdlg.output_folder"), start)
+        if folder:
+            self._edit_subfolder.setText(folder)
 
     def _on_codec_changed(self, text: str) -> None:
         is_prores = text.startswith("ProRes")
