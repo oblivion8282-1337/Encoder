@@ -67,6 +67,16 @@ pub fn build_ffmpeg_args(
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
+            "nvenc" => {
+                // CUDA-Decode: Frames in CUDA-Memory halten wenn skaliert wird,
+                // damit scale_cuda direkt auf GPU arbeiten kann.
+                args.push("-hwaccel".to_string());
+                args.push("cuda".to_string());
+                if options.proxy_resolution.is_some() {
+                    args.push("-hwaccel_output_format".to_string());
+                    args.push("cuda".to_string());
+                }
+            }
             _ => {}
         }
     }
@@ -128,11 +138,11 @@ pub fn build_ffmpeg_args(
                     args.push("-qp".to_string());
                     args.push("23".to_string());
 
-                    // Skalierung falls gewuenscht (normaler scale-Filter)
+                    // scale_cuda arbeitet direkt auf CUDA-Frames (GPU-seitig)
                     if let Some(ref resolution) = options.proxy_resolution {
                         let res = normalize_resolution(resolution);
                         args.push("-vf".to_string());
-                        args.push(format!("scale={res}"));
+                        args.push(format!("scale_cuda={res}"));
                     }
                 }
                 _ => {
