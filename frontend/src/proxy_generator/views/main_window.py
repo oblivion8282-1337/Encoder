@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
         nl = QVBoxLayout(self._grp_naming)
         self._lbl_suffix = QLabel("")
         nl.addWidget(self._lbl_suffix)
-        self._edit_suffix = QLineEdit("_proxy")
+        self._edit_suffix = QLineEdit()
         nl.addWidget(self._edit_suffix)
         self._lbl_subfolder = QLabel("")
         nl.addWidget(self._lbl_subfolder)
@@ -413,17 +413,26 @@ class MainWindow(QMainWindow):
         row = self._table.rowAt(pos.y())
         if row < 0:
             return
-        menu = QMenu(self)
-        act_cancel = menu.addAction(tr("ctx.cancel"))
-        act_remove = menu.addAction(tr("ctx.remove"))
-        action = menu.exec(self._table.viewport().mapToGlobal(pos))
-        if action is None or self._vm is None:
-            return
-        jobs = self._vm.jobs
+        jobs = self._vm.jobs if self._vm else []
         if row >= len(jobs):
             return
         job = jobs[row]
-        if action == act_cancel:
+
+        menu = QMenu(self)
+        act_reset = menu.addAction(tr("ctx.reset"))
+        act_reset.setEnabled(
+            job.status in (JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED))
+        act_cancel = menu.addAction(tr("ctx.cancel"))
+        act_cancel.setEnabled(
+            job.status in (JobStatus.QUEUED, JobStatus.RUNNING))
+        act_remove = menu.addAction(tr("ctx.remove"))
+
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if action is None or self._vm is None:
+            return
+        if action == act_reset:
+            self._vm.reset_job(job.id)
+        elif action == act_cancel:
             self._vm.cancel_job(job.id)
         elif action == act_remove:
             self._vm.remove_job(job.id)
@@ -555,7 +564,7 @@ class MainWindow(QMainWindow):
         except (ValueError, TypeError):
             parallel = 1
         self._spin_parallel.setValue(parallel)
-        self._edit_suffix.setText(self._settings.value("output_suffix", "_proxy"))
+        self._edit_suffix.setText(self._settings.value("output_suffix", ""))
         self._edit_subfolder.setText(self._settings.value("output_subfolder", ""))
         # Language (must be loaded before retranslate_ui is called)
         lang = self._settings.value("language", "de")

@@ -87,7 +87,7 @@ fn default_hw_accel() -> String {
 }
 
 fn default_output_suffix() -> String {
-    "_proxy".to_string()
+    String::new()
 }
 
 // ---------------------------------------------------------------------------

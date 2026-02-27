@@ -68,12 +68,19 @@ pub fn build_ffmpeg_args(
                 args.push("/dev/dri/renderD128".to_string());
             }
             "nvenc" => {
-                // Explizites CUDA-Device fuer den Filtergraph (Option B):
-                // CPU-Decode (kein hwaccel) → format=nv12 → hwupload → scale_cuda → NVENC.
-                // Funktioniert mit beliebigen Eingangsformaten (auch p210le, 10-bit 4:2:2).
+                // Volle GPU-Pipeline: NVDEC-Decode → hwupload (No-op bei CUDA-Frames) →
+                // scale_cuda → NVENC-Encode.
+                // -init_hw_device legt ein benanntes CUDA-Device an, das sowohl vom Decoder
+                // (-hwaccel cuda) als auch vom Filtergraph (-filter_hw_device) genutzt wird.
+                // Fallback auf CPU-Decode wenn der Input-Codec nicht von NVDEC unterstuetzt wird;
+                // hwupload laed die Frames dann aus dem RAM hoch.
                 args.push("-init_hw_device".to_string());
                 args.push("cuda=cuda:0".to_string());
                 args.push("-filter_hw_device".to_string());
+                args.push("cuda".to_string());
+                args.push("-hwaccel".to_string());
+                args.push("cuda".to_string());
+                args.push("-hwaccel_output_format".to_string());
                 args.push("cuda".to_string());
             }
             _ => {}
@@ -202,7 +209,7 @@ fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<
     args.push(qp.to_string());
     if let Some(res) = resolution {
         args.push("-vf".to_string());
-        args.push(format!("format=nv12,hwupload,scale_cuda={res}"));
+        args.push(format!("hwupload,scale_cuda={res}"));
     }
 }
 

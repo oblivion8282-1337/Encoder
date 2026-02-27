@@ -25,7 +25,7 @@ class JobOptions:
     proxy_resolution: Optional[str] = None
     proxy_codec: str = "h264"
     hw_accel: str = "none"
-    output_suffix: str = "_proxy"
+    output_suffix: str = ""
     output_subfolder: str = ""
 
 

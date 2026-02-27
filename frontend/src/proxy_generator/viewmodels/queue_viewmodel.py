@@ -117,6 +117,21 @@ class QueueViewModel(QObject):
             except (RuntimeError, BrokenPipeError, OSError) as e:
                 log.error("Failed to cancel job %s: %s", job_id, e)
 
+    def reset_job(self, job_id: str) -> None:
+        """Fertigen/fehlgeschlagenen Job auf QUEUED zurücksetzen, damit er neu gestartet werden kann."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        if job.status not in (JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED):
+            return
+        job.status = JobStatus.QUEUED
+        job.progress = 0.0
+        job.fps = 0.0
+        job.speed = 0.0
+        job.error = None
+        self._submitted.discard(job_id)
+        self.job_updated.emit(job_id)
+
     def remove_job(self, job_id: str) -> None:
         """Remove a single job from the queue."""
         if job_id in self._jobs:

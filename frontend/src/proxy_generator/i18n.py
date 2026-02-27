@@ -68,8 +68,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "status.error":     {"de": "Fehler",     "en": "Error"},
     "status.cancelled": {"de": "Abgebrochen","en": "Cancelled"},
     # ── Kontextmenü ────────────────────────────────────────────────────────
-    "ctx.cancel": {"de": "Abbrechen", "en": "Cancel"},
-    "ctx.remove": {"de": "Entfernen", "en": "Remove"},
+    "ctx.reset":  {"de": "Zurücksetzen", "en": "Reset"},
+    "ctx.cancel": {"de": "Abbrechen",    "en": "Cancel"},
+    "ctx.remove": {"de": "Entfernen",    "en": "Remove"},
     # ── Statusleiste ───────────────────────────────────────────────────────
     "statusbar.summary":  {"de": "{total} Jobs | {running} laufen | {done} fertig",
                            "en": "{total} jobs | {running} running | {done} done"},
