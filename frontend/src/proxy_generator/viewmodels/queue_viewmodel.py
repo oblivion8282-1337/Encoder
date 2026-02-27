@@ -28,6 +28,7 @@ class QueueViewModel(QObject):
         self._client = ipc_client
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []  # insertion order
+        self._submitted: set[str] = set()  # job IDs already sent to backend
         self._worker: Optional[BackendWorker] = None
 
     # -- public API -------------------------------------------------------------
@@ -43,7 +44,7 @@ class QueueViewModel(QObject):
         mode: JobMode,
         options: JobOptions,
     ) -> None:
-        """Create Job objects for each path and send them to the backend."""
+        """Dateien lokal zur Queue hinzufuegen (noch nicht ans Backend senden)."""
         existing_paths = {job.input_path for job in self._jobs.values()}
 
         for p in paths:
@@ -65,13 +66,23 @@ class QueueViewModel(QObject):
                 mode=mode,
                 options=options,
             )
+            self._jobs[job.id] = job
+            self._order.append(job.id)
+        self.jobs_changed.emit()
+
+    def start_all(self) -> None:
+        """Alle lokal wartenden Jobs ans Backend senden und starten."""
+        for job_id in list(self._order):
+            job = self._jobs.get(job_id)
+            if job is None or job_id in self._submitted:
+                continue
+            if job.status != JobStatus.QUEUED:
+                continue
             try:
                 self._client.add_job(job)
-                self._jobs[job.id] = job
-                self._order.append(job.id)
+                self._submitted.add(job_id)
             except (RuntimeError, BrokenPipeError, OSError) as e:
-                log.error("Failed to add job %s: %s", p, e)
-        self.jobs_changed.emit()
+                log.error("Failed to submit job %s: %s", job.input_path, e)
 
     def start_worker(self) -> None:
         """Start the backend reader worker in the thread pool."""
@@ -100,25 +111,27 @@ class QueueViewModel(QObject):
         """Remove a single job from the queue."""
         if job_id in self._jobs:
             job = self._jobs[job_id]
-            if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+            if job_id in self._submitted and job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
                 try:
                     self._client.cancel_job(job_id)
                 except (RuntimeError, BrokenPipeError, OSError) as e:
                     log.error("Failed to cancel job %s during remove: %s", job_id, e)
             del self._jobs[job_id]
             self._order = [jid for jid in self._order if jid != job_id]
+            self._submitted.discard(job_id)
             self.jobs_changed.emit()
 
     def clear_all(self) -> None:
         """Alle Jobs aus der Queue entfernen (auch laufende werden abgebrochen)."""
         for job_id in list(self._jobs.keys()):
-            if self._jobs[job_id].status in (JobStatus.RUNNING, JobStatus.QUEUED):
+            if job_id in self._submitted and self._jobs[job_id].status in (JobStatus.RUNNING, JobStatus.QUEUED):
                 try:
                     self._client.cancel_job(job_id)
                 except Exception:
                     pass
         self._jobs.clear()
         self._order.clear()
+        self._submitted.clear()
         self.jobs_changed.emit()
 
     def clear_done(self) -> None:

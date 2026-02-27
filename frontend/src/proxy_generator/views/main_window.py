@@ -261,9 +261,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Queue leer",
                 "Bitte zuerst Dateien ueber 'Dateien hinzufuegen' hinzufuegen.")
             return
-        # Worker is already started by the app on startup.
-        # Jobs are sent to the backend immediately when added.
-        self._statusbar.showMessage("Jobs werden verarbeitet...", 3000)
+        self._vm.start_all()
+        self._statusbar.showMessage("Jobs gestartet.", 3000)
 
     def _on_clear_done(self) -> None:
         if self._vm is None:
