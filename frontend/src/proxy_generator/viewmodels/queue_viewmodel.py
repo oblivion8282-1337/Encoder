@@ -50,6 +50,9 @@ class QueueViewModel(QObject):
             if p in existing_paths:
                 log.warning("Datei bereits in Queue: %s", p)
                 continue
+            if os.path.basename(p).startswith("._"):
+                log.debug("macOS-Metadatei übersprungen: %s", p)
+                continue
             if not os.path.isfile(p):
                 log.warning("Datei nicht gefunden: %s", p)
                 continue
