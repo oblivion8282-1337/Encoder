@@ -68,14 +68,13 @@ pub fn build_ffmpeg_args(
                 args.push("/dev/dri/renderD128".to_string());
             }
             "nvenc" => {
-                args.push("-hwaccel".to_string());
+                // Explizites CUDA-Device fuer den Filtergraph (Option B):
+                // CPU-Decode (kein hwaccel) → format=nv12 → hwupload → scale_cuda → NVENC.
+                // Funktioniert mit beliebigen Eingangsformaten (auch p210le, 10-bit 4:2:2).
+                args.push("-init_hw_device".to_string());
+                args.push("cuda=cuda:0".to_string());
+                args.push("-filter_hw_device".to_string());
                 args.push("cuda".to_string());
-                // AV1 NVENC akzeptiert keine CUDA-Frames → kein hwaccel_output_format
-                // H.264/H.265 NVENC: Frames in CUDA-Memory halten wenn skaliert → scale_cuda
-                if options.proxy_resolution.is_some() && options.proxy_codec != "av1" {
-                    args.push("-hwaccel_output_format".to_string());
-                    args.push("cuda".to_string());
-                }
             }
             _ => {}
         }
@@ -190,7 +189,8 @@ fn push_vaapi(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
 }
 
 /// NVENC-Encoder (h264_nvenc / hevc_nvenc).
-/// scale_cuda fuer GPU-seitige Skalierung (Frames bleiben in CUDA-Memory).
+/// CPU-Decode → format=nv12 (beliebiges Eingangsformat) → hwupload (CUDA) →
+/// scale_cuda (GPU-Skalierung) → NVENC-Encode.
 fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<&str>) {
     args.push("-c:v".to_string());
     args.push(codec.to_string());
@@ -202,7 +202,7 @@ fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<
     args.push(qp.to_string());
     if let Some(res) = resolution {
         args.push("-vf".to_string());
-        args.push(format!("scale_cuda={res}"));
+        args.push(format!("format=nv12,hwupload,scale_cuda={res}"));
     }
 }
 
