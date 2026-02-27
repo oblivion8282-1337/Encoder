@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends.default"
+
+[project]
+name = "proxy-generator"
+version = "0.1.0"
+description = "GUI-Frontend für den Proxy Generator"
+requires-python = ">=3.11"
+dependencies = [
+    "PyQt6>=6.6",
+]
+
+[project.scripts]
+proxy-generator = "proxy_generator.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/proxy_generator"]

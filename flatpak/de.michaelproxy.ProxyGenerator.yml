@@ -1,0 +1,76 @@
+app-id: de.michaelproxy.ProxyGenerator
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+base: com.riverbankcomputing.PyQt.BaseApp
+base-version: '6.9'
+command: proxy-generator
+
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+add-extensions:
+  org.freedesktop.Platform.ffmpeg-full:
+    directory: lib/ffmpeg
+    version: '24.08'
+    add-ld-path: .
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/backend/cargo
+
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=host
+
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
+
+modules:
+  # 1. Python-Abhängigkeiten (generiert via flatpak-pip-generator)
+  - python3-requirements.json
+
+  # 2. Rust Backend Binary
+  - name: backend
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_NET_OFFLINE: 'true'
+    sources:
+      - cargo-sources.json
+      - type: dir
+        path: ../backend
+    build-commands:
+      - cargo build --release --offline
+      - install -Dm755 target/release/proxy-generator-backend /app/bin/proxy-generator-backend
+
+  # 3. Python Frontend
+  - name: frontend
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ../frontend
+    build-commands:
+      - pip3 install --no-deps --prefix=/app .
+      - mkdir -p /app/lib/ffmpeg
+
+  # 4. Desktop Entry + Icon
+  - name: desktop-integration
+    buildsystem: simple
+    sources:
+      - type: inline
+        dest-filename: de.michaelproxy.ProxyGenerator.desktop
+        contents: |
+          [Desktop Entry]
+          Name=Proxy Generator
+          Comment=Video proxy and re-wrapper for DaVinci Resolve
+          Exec=proxy-generator
+          Icon=de.michaelproxy.ProxyGenerator
+          Type=Application
+          Categories=AudioVideo;Video;
+    build-commands:
+      - install -Dm644 de.michaelproxy.ProxyGenerator.desktop /app/share/applications/de.michaelproxy.ProxyGenerator.desktop

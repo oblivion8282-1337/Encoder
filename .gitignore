@@ -1,0 +1,19 @@
+# Rust
+backend/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Flatpak generated files
+flatpak/cargo-sources.json
+flatpak/python3-requirements.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
