@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QModelIndex
+from PyQt6.QtCore import Qt, QModelIndex, QSettings
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -64,12 +64,15 @@ class MainWindow(QMainWindow):
     def __init__(self, viewmodel=None) -> None:
         super().__init__()
         self._vm = viewmodel  # set later via set_viewmodel if None
+        self._settings = QSettings("proxy-generator", "ProxyGenerator")
         self.setWindowTitle("Proxy Generator")
         self.setMinimumSize(1000, 650)
+        self.setAcceptDrops(True)
 
         self._build_toolbar()
         self._build_central()
         self._build_statusbar()
+        self._load_settings()
 
         if self._vm is not None:
             self._connect_viewmodel()
@@ -105,6 +108,11 @@ class MainWindow(QMainWindow):
         self._act_clear.triggered.connect(self._on_clear_done)
         tb.addAction(self._act_clear)
 
+        self._act_clear_all = QAction("Queue leeren", self)
+        self._act_clear_all.triggered.connect(
+            lambda: self._vm.clear_all() if self._vm else None)
+        tb.addAction(self._act_clear_all)
+
     # -- central widget ---------------------------------------------------------
 
     def _build_central(self) -> None:
@@ -120,6 +128,7 @@ class MainWindow(QMainWindow):
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
+        self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         header = self._table.horizontalHeader()
         header.setStretchLastSection(True)
         header.setSectionResizeMode(COL_FILENAME, QHeaderView.ResizeMode.Stretch)
@@ -267,9 +276,13 @@ class MainWindow(QMainWindow):
         if folder:
             self._output_dir_edit.setText(folder)
 
-    def _on_mode_changed(self, button_id: int, checked: bool) -> None:
+    def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
-            self._grp_proxy.setVisible(button_id == 1)
+            if button_id == -1:
+                # Called directly (e.g. from _load_settings) - check current state
+                self._grp_proxy.setVisible(self._rb_proxy.isChecked())
+            else:
+                self._grp_proxy.setVisible(button_id == 1)
 
     # -- context menu -----------------------------------------------------------
 
@@ -406,9 +419,82 @@ class MainWindow(QMainWindow):
         done = sum(1 for j in jobs if j.status == JobStatus.DONE)
         self._status_label.setText(f"{total} Jobs | {running} laufen | {done} fertig")
 
+    # -- settings persistence ---------------------------------------------------
+
+    def _load_settings(self) -> None:
+        self._output_dir_edit.setText(
+            self._settings.value("output_dir", str(Path.home())))
+        mode = self._settings.value("mode", "rewrap")
+        if mode == "proxy":
+            self._rb_proxy.setChecked(True)
+        else:
+            self._rb_rewrap.setChecked(True)
+        self._on_mode_changed()
+        res = self._settings.value("proxy_resolution", "Beibehalten")
+        idx = self._combo_resolution.findText(res)
+        if idx >= 0:
+            self._combo_resolution.setCurrentIndex(idx)
+        codec = self._settings.value("proxy_codec", "H.264")
+        idx = self._combo_codec.findText(codec)
+        if idx >= 0:
+            self._combo_codec.setCurrentIndex(idx)
+        hw = self._settings.value("hw_accel", "Keins")
+        idx = self._combo_hw.findText(hw)
+        if idx >= 0:
+            self._combo_hw.setCurrentIndex(idx)
+        parallel = int(self._settings.value("parallel_jobs", 1))
+        self._spin_parallel.setValue(parallel)
+
+    def _save_settings(self) -> None:
+        self._settings.setValue("output_dir", self._output_dir_edit.text())
+        mode = "proxy" if self._rb_proxy.isChecked() else "rewrap"
+        self._settings.setValue("mode", mode)
+        self._settings.setValue("proxy_resolution",
+                                self._combo_resolution.currentText())
+        self._settings.setValue("proxy_codec",
+                                self._combo_codec.currentText())
+        self._settings.setValue("hw_accel", self._combo_hw.currentText())
+        self._settings.setValue("parallel_jobs", self._spin_parallel.value())
+
+    # -- drag & drop ------------------------------------------------------------
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        paths = []
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if Path(path).suffix.lower() in VIDEO_EXTENSIONS:
+                paths.append(path)
+            elif Path(path).is_dir():
+                for f in Path(path).rglob("*"):
+                    if f.suffix.lower() in VIDEO_EXTENSIONS:
+                        paths.append(str(f))
+        if paths:
+            self._submit_jobs(paths)
+
+    # -- error dialog on double-click -------------------------------------------
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        if self._vm is None:
+            return
+        jobs = self._vm.jobs
+        if row >= len(jobs):
+            return
+        job = jobs[row]
+        if job.status == JobStatus.ERROR and job.error:
+            QMessageBox.warning(
+                self,
+                "Job-Fehler",
+                f"Datei: {Path(job.input_path).name}\n\nFehler:\n{job.error}",
+            )
+
     # -- cleanup ----------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        self._save_settings()
         if self._vm is not None:
             self._vm.stop()
         super().closeEvent(event)

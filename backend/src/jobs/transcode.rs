@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::ffmpeg::runner::{self, build_ffmpeg_args, FfmpegEvent};
@@ -147,7 +147,7 @@ pub async fn run_queue(
     shutdown_token: CancellationToken,
 ) {
     let semaphore = Arc::new(Semaphore::new(max_parallel));
-    let jobs: Arc<Mutex<HashMap<String, Job>>> = Arc::new(Mutex::new(HashMap::new()));
+    let jobs: Arc<RwLock<HashMap<String, Job>>> = Arc::new(RwLock::new(HashMap::new()));
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
@@ -217,14 +217,14 @@ pub async fn run_queue(
                                 message: "Quelldatei konnte nicht gelesen werden (ffprobe fehlgeschlagen)".to_string(),
                             })
                             .await;
-                        jobs.lock().await.remove(&job_id);
+                        jobs.write().await.remove(&job_id);
                         continue;
                     }
                 };
 
                 job.status = JobState::Queued;
                 {
-                    let mut map = jobs.lock().await;
+                    let mut map = jobs.write().await;
                     map.insert(job_id.clone(), job);
                 }
 
@@ -247,14 +247,14 @@ pub async fn run_queue(
                                 id: job_id.clone(),
                                 message: "Semaphore geschlossen, Job kann nicht starten".to_string(),
                             }).await;
-                            jobs_ref.lock().await.remove(&job_id);
+                            jobs_ref.write().await.remove(&job_id);
                             return;
                         }
                     };
 
                     // Status auf Running setzen
                     {
-                        let mut map = jobs_ref.lock().await;
+                        let mut map = jobs_ref.write().await;
                         if let Some(j) = map.get_mut(&job_id) {
                             j.status = JobState::Running;
                         }
@@ -287,7 +287,7 @@ pub async fn run_queue(
                                 frame,
                             } => {
                                 {
-                                    let mut map = jobs_ref.lock().await;
+                                    let mut map = jobs_ref.write().await;
                                     if let Some(j) = map.get_mut(&id) {
                                         j.percent = percent;
                                     }
@@ -304,7 +304,7 @@ pub async fn run_queue(
                             }
                             FfmpegEvent::Done { id } => {
                                 {
-                                    let mut map = jobs_ref.lock().await;
+                                    let mut map = jobs_ref.write().await;
                                     if let Some(j) = map.get_mut(&id) {
                                         j.status = JobState::Done;
                                         j.percent = 100.0;
@@ -314,7 +314,7 @@ pub async fn run_queue(
                             }
                             FfmpegEvent::Error { id, message } => {
                                 {
-                                    let mut map = jobs_ref.lock().await;
+                                    let mut map = jobs_ref.write().await;
                                     if let Some(j) = map.get_mut(&id) {
                                         j.status = JobState::Error;
                                     }
@@ -325,7 +325,7 @@ pub async fn run_queue(
                             }
                             FfmpegEvent::Cancelled { id } => {
                                 {
-                                    let mut map = jobs_ref.lock().await;
+                                    let mut map = jobs_ref.write().await;
                                     if let Some(j) = map.get_mut(&id) {
                                         j.status = JobState::Cancelled;
                                     }
@@ -353,13 +353,13 @@ pub async fn run_queue(
                 });
             }
             JobCommand::Cancel(id) => {
-                let map = jobs.lock().await;
+                let map = jobs.read().await;
                 if let Some(job) = map.get(&id) {
                     job.cancel_token.cancel();
                 }
             }
             JobCommand::GetStatus(reply) => {
-                let mut map = jobs.lock().await;
+                let mut map = jobs.write().await;
                 // Alte abgeschlossene Jobs entfernen
                 map.retain(|_, job| {
                     matches!(job.status, JobState::Running | JobState::Queued)

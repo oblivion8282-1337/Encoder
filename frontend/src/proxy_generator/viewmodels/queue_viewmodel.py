@@ -51,7 +51,12 @@ class QueueViewModel(QObject):
         options: JobOptions,
     ) -> None:
         """Create Job objects for each path and send them to the backend."""
+        existing_paths = {job.input_path for job in self._jobs.values()}
+
         for p in paths:
+            if p in existing_paths:
+                log.warning("Datei bereits in Queue: %s", p)
+                continue
             if not os.path.isfile(p):
                 log.warning("Datei nicht gefunden: %s", p)
                 continue
@@ -90,9 +95,10 @@ class QueueViewModel(QObject):
         if job is None:
             return
         if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
-            self._client.cancel_job(job_id)
-            job.status = JobStatus.CANCELLED
-            self.job_updated.emit(job_id)
+            try:
+                self._client.cancel_job(job_id)
+            except (RuntimeError, BrokenPipeError, OSError) as e:
+                log.error("Failed to cancel job %s: %s", job_id, e)
 
     def remove_job(self, job_id: str) -> None:
         """Remove a single job from the queue."""
@@ -103,6 +109,18 @@ class QueueViewModel(QObject):
             del self._jobs[job_id]
             self._order = [jid for jid in self._order if jid != job_id]
             self.jobs_changed.emit()
+
+    def clear_all(self) -> None:
+        """Alle Jobs aus der Queue entfernen (auch laufende werden abgebrochen)."""
+        for job_id in list(self._jobs.keys()):
+            if self._jobs[job_id].status == JobStatus.RUNNING:
+                try:
+                    self._client.cancel_job(job_id)
+                except Exception:
+                    pass
+        self._jobs.clear()
+        self._order.clear()
+        self.jobs_changed.emit()
 
     def clear_done(self) -> None:
         """Remove all completed / errored / cancelled jobs."""
