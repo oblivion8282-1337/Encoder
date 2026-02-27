@@ -104,6 +104,7 @@ class IpcClient:
             "hw_accel": job.options.hw_accel,
             "output_suffix": job.options.output_suffix,
             "output_subfolder": job.options.output_subfolder,
+            "skip_if_exists": job.options.skip_if_exists,
         }
         if job.options.proxy_resolution is not None:
             options["proxy_resolution"] = job.options.proxy_resolution

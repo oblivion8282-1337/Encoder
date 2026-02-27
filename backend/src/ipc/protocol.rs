@@ -59,6 +59,10 @@ pub struct JobOptions {
     /// Optionaler Unterordner im Ausgabeverzeichnis, z.B. "proxy". Leer = keiner.
     #[serde(default)]
     pub output_subfolder: String,
+
+    /// Wenn true: Job sofort als Done markieren wenn Ausgabedatei bereits existiert.
+    #[serde(default)]
+    pub skip_if_exists: bool,
 }
 
 impl Default for JobOptions {
@@ -70,6 +74,7 @@ impl Default for JobOptions {
             hw_accel: default_hw_accel(),
             output_suffix: default_output_suffix(),
             output_subfolder: String::new(),
+            skip_if_exists: false,
         }
     }
 }

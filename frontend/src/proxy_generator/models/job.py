@@ -27,6 +27,7 @@ class JobOptions:
     hw_accel: str = "none"
     output_suffix: str = ""
     output_subfolder: str = ""
+    skip_if_exists: bool = False
 
 
 @dataclass

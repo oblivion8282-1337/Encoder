@@ -231,10 +231,21 @@ pub async fn run_queue(
                 };
                 let nvenc_full_gpu = nvenc_full_gpu_supported(&pix_fmt);
 
+                // Ausgabedatei bereits vorhanden und Skip aktiviert?
+                let output_path = job.output_path();
+                if job.options.skip_if_exists && output_path.exists() {
+                    let _ = response_tx
+                        .send(Response::JobQueued { id: job_id.clone() })
+                        .await;
+                    let _ = response_tx
+                        .send(Response::JobDone { id: job_id })
+                        .await;
+                    continue;
+                }
+
                 // Job an globales Shutdown-Token haengen
                 job.attach_to_parent_token(&shutdown_token);
                 let cancel_token = job.cancel_token.clone();
-                let output_path = job.output_path();
                 let args = build_ffmpeg_args(
                     &job.input_path,
                     &output_path,

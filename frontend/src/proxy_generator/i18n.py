@@ -52,6 +52,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "lbl.subfolder":    {"de": "Unterordner:", "en": "Subfolder:"},
     "placeholder.suffix":    {"de": "leer = kein Suffix",      "en": "empty = no suffix"},
     "placeholder.subfolder": {"de": "z.B. proxy (leer = keiner)", "en": "e.g. proxy (empty = none)"},
+    "chk.skip_existing":     {"de": "Vorhandene überspringen",  "en": "Skip existing outputs"},
     # ── Widgets ────────────────────────────────────────────────────────────
     "btn.browse":         {"de": "Wählen",                   "en": "Browse"},
     "placeholder.output": {"de": "Ausgabe-Ordner wählen...", "en": "Choose output folder..."},

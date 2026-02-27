@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QCheckBox,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -211,6 +212,8 @@ class MainWindow(QMainWindow):
         self._btn_subfolder.clicked.connect(self._on_browse_subfolder)
         subfolder_row.addWidget(self._btn_subfolder)
         nl.addLayout(subfolder_row)
+        self._chk_skip_existing = QCheckBox("")
+        nl.addWidget(self._chk_skip_existing)
         layout.addWidget(self._grp_naming)
 
         # -- Hardware encoding --------------------------------------------------
@@ -289,6 +292,7 @@ class MainWindow(QMainWindow):
         self._lbl_subfolder.setText(tr("lbl.subfolder"))
         self._edit_subfolder.setPlaceholderText(tr("placeholder.subfolder"))
         self._btn_subfolder.setText(tr("btn.browse"))
+        self._chk_skip_existing.setText(tr("chk.skip_existing"))
         self._grp_hw.setTitle(tr("grp.hw"))
         self._grp_par.setTitle(tr("grp.parallel"))
         self._grp_lang.setTitle(tr("grp.lang"))
@@ -360,6 +364,7 @@ class MainWindow(QMainWindow):
             hw_accel=hw_map.get(self._combo_hw.currentText(), "none"),
             output_suffix=self._edit_suffix.text(),
             output_subfolder=self._edit_subfolder.text().strip(),
+            skip_if_exists=self._chk_skip_existing.isChecked(),
         )
 
     def _on_start_all(self) -> None:
@@ -566,6 +571,8 @@ class MainWindow(QMainWindow):
         self._spin_parallel.setValue(parallel)
         self._edit_suffix.setText(self._settings.value("output_suffix", ""))
         self._edit_subfolder.setText(self._settings.value("output_subfolder", ""))
+        self._chk_skip_existing.setChecked(
+            self._settings.value("skip_if_exists", False, type=bool))
         # Language (must be loaded before retranslate_ui is called)
         lang = self._settings.value("language", "de")
         set_language(lang)
@@ -586,6 +593,7 @@ class MainWindow(QMainWindow):
         self._settings.setValue("parallel_jobs", self._spin_parallel.value())
         self._settings.setValue("output_suffix", self._edit_suffix.text())
         self._settings.setValue("output_subfolder", self._edit_subfolder.text().strip())
+        self._settings.setValue("skip_if_exists", self._chk_skip_existing.isChecked())
         self._settings.setValue("language", get_language())
 
     # -- drag & drop ------------------------------------------------------------
