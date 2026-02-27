@@ -201,20 +201,23 @@ pub async fn run_queue(
                 };
                 job.output_dir = output_dir;
 
-                // Job an globales Shutdown-Token haengen
-                job.attach_to_parent_token(&shutdown_token);
-                let cancel_token = job.cancel_token.clone();
-                let output_path = job.output_path();
-                let args = build_ffmpeg_args(
-                    &job.input_path,
-                    &output_path,
-                    &job.mode,
-                    &job.options,
-                );
-
-                // Dauer der Quelldatei ermitteln (via ffprobe)
+                // Dauer und Pixel-Format der Quelldatei ermitteln (parallel via ffprobe).
+                // Das Pixel-Format wird benoetigt um fuer NVENC die optimale Pipeline
+                // zu waehlen (volle GPU vs. Hybrid mit CPU-Format-Konvertierung).
                 let input_path_clone = job.input_path.clone();
-                let total_duration_us = match probe_duration(&input_path_clone).await {
+                let needs_pix_fmt = matches!(job.mode, JobMode::Proxy)
+                    && job.options.hw_accel == "nvenc";
+                let (duration_result, pix_fmt) = tokio::join!(
+                    probe_duration(&input_path_clone),
+                    async {
+                        if needs_pix_fmt {
+                            probe_pix_fmt(&input_path_clone).await
+                        } else {
+                            String::new()
+                        }
+                    },
+                );
+                let total_duration_us = match duration_result {
                     Ok(d) if d > 0 => d,
                     Ok(_) | Err(_) => {
                         let _ = response_tx
@@ -226,6 +229,19 @@ pub async fn run_queue(
                         continue;
                     }
                 };
+                let nvenc_full_gpu = nvenc_full_gpu_supported(&pix_fmt);
+
+                // Job an globales Shutdown-Token haengen
+                job.attach_to_parent_token(&shutdown_token);
+                let cancel_token = job.cancel_token.clone();
+                let output_path = job.output_path();
+                let args = build_ffmpeg_args(
+                    &job.input_path,
+                    &output_path,
+                    &job.mode,
+                    &job.options,
+                    nvenc_full_gpu,
+                );
 
                 job.status = JobState::Queued;
                 {
@@ -403,6 +419,45 @@ pub async fn run_queue(
             }
         }
     }
+}
+
+/// Ermittelt das Pixel-Format des ersten Video-Streams via ffprobe.
+/// Gibt einen leeren String zurueck wenn das Format nicht ermittelt werden kann
+/// (fuehrt dann zur sicheren Hybrid-Pipeline).
+async fn probe_pix_fmt(path: &Path) -> String {
+    let output = tokio::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=pix_fmt",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path.as_os_str())
+        .output()
+        .await;
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// Gibt true zurueck wenn NVDEC + scale_cuda das gegebene Pixel-Format unterstuetzen.
+/// NVDEC unterstuetzt 4:2:0-Formate (8-bit und 10-bit); 4:2:2 (z.B. p210le von
+/// Sony FX MXF) und andere exotische Formate erfordern die Hybrid-Pipeline.
+fn nvenc_full_gpu_supported(pix_fmt: &str) -> bool {
+    matches!(
+        pix_fmt,
+        "yuv420p" | "nv12" | "yuvj420p"
+            | "yuv420p10le" | "yuv420p10be"
+            | "p010le" | "p010be" | "p016le"
+            | "yuv420p12le" | "p012le"
+    )
 }
 
 /// Ermittelt die Dauer einer Mediendatei in Mikrosekunden via ffprobe.

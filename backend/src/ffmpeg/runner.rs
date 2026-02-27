@@ -54,6 +54,7 @@ pub fn build_ffmpeg_args(
     output_path: &Path,
     mode: &JobMode,
     options: &JobOptions,
+    nvenc_full_gpu: bool,
 ) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -68,20 +69,23 @@ pub fn build_ffmpeg_args(
                 args.push("/dev/dri/renderD128".to_string());
             }
             "nvenc" => {
-                // Volle GPU-Pipeline: NVDEC-Decode → hwupload (No-op bei CUDA-Frames) →
-                // scale_cuda → NVENC-Encode.
-                // -init_hw_device legt ein benanntes CUDA-Device an, das sowohl vom Decoder
-                // (-hwaccel cuda) als auch vom Filtergraph (-filter_hw_device) genutzt wird.
-                // Fallback auf CPU-Decode wenn der Input-Codec nicht von NVDEC unterstuetzt wird;
-                // hwupload laed die Frames dann aus dem RAM hoch.
+                // CUDA-Device fuer Filtergraph (benoetigt von hwupload + scale_cuda).
                 args.push("-init_hw_device".to_string());
                 args.push("cuda=cuda:0".to_string());
                 args.push("-filter_hw_device".to_string());
                 args.push("cuda".to_string());
-                args.push("-hwaccel".to_string());
-                args.push("cuda".to_string());
-                args.push("-hwaccel_output_format".to_string());
-                args.push("cuda".to_string());
+                if nvenc_full_gpu {
+                    // Volle GPU-Pipeline: NVDEC dekodiert direkt in den GPU-Speicher.
+                    // Frames bleiben auf der GPU – kein PCIe-Transfer noetig.
+                    args.push("-hwaccel".to_string());
+                    args.push("cuda".to_string());
+                    args.push("-hwaccel_device".to_string());
+                    args.push("cuda".to_string());
+                    args.push("-hwaccel_output_format".to_string());
+                    args.push("cuda".to_string());
+                }
+                // Ohne nvenc_full_gpu: CPU-Decode → format=nv12 → hwupload → scale_cuda.
+                // Wird fuer Formate gewaehlt, die NVDEC nicht unterstuetzt (z.B. p210le).
             }
             _ => {}
         }
@@ -119,7 +123,7 @@ pub fn build_ffmpeg_args(
                 .proxy_resolution
                 .as_deref()
                 .map(normalize_resolution);
-            push_proxy_codec_args(&mut args, &options.proxy_codec, &options.hw_accel, res.as_deref());
+            push_proxy_codec_args(&mut args, &options.proxy_codec, &options.hw_accel, res.as_deref(), nvenc_full_gpu);
 
             // Audio bei Proxy: pcm_s16le
             args.push("-c:a".to_string());
@@ -151,18 +155,19 @@ fn push_proxy_codec_args(
     proxy_codec: &str,
     hw_accel: &str,
     resolution: Option<&str>,
+    nvenc_full_gpu: bool,
 ) {
     match proxy_codec {
         // ── H.264 ──────────────────────────────────────────────────────────
         "h264" => match hw_accel {
             "vaapi" => push_vaapi(args, "h264_vaapi", resolution),
-            "nvenc" => push_nvenc(args, "h264_nvenc", "23", resolution),
+            "nvenc" => push_nvenc(args, "h264_nvenc", "23", resolution, nvenc_full_gpu),
             _       => push_sw_x264(args, resolution),
         },
         // ── H.265 / HEVC ───────────────────────────────────────────────────
         "h265" => match hw_accel {
             "vaapi" => push_vaapi(args, "hevc_vaapi", resolution),
-            "nvenc" => push_nvenc(args, "hevc_nvenc", "23", resolution),
+            "nvenc" => push_nvenc(args, "hevc_nvenc", "23", resolution, nvenc_full_gpu),
             _       => push_sw_x265(args, resolution),
         },
         // ── AV1 ────────────────────────────────────────────────────────────
@@ -198,7 +203,7 @@ fn push_vaapi(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
 /// NVENC-Encoder (h264_nvenc / hevc_nvenc).
 /// CPU-Decode → format=nv12 (beliebiges Eingangsformat) → hwupload (CUDA) →
 /// scale_cuda (GPU-Skalierung) → NVENC-Encode.
-fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<&str>) {
+fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<&str>, full_gpu: bool) {
     args.push("-c:v".to_string());
     args.push(codec.to_string());
     args.push("-preset".to_string());
@@ -207,9 +212,24 @@ fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<
     args.push("constqp".to_string());
     args.push("-qp".to_string());
     args.push(qp.to_string());
-    if let Some(res) = resolution {
-        args.push("-vf".to_string());
-        args.push(format!("hwupload,scale_cuda={res}"));
+    if full_gpu {
+        // CUDA-Frames direkt von NVDEC → scale_cuda → NVENC, kein PCIe-Transfer.
+        if let Some(res) = resolution {
+            args.push("-vf".to_string());
+            args.push(format!("scale_cuda={res}"));
+        }
+        // Ohne Skalierung: CUDA-Frames gehen direkt an NVENC, kein -vf noetig.
+    } else {
+        // Hybrid: CPU-Decode → format=nv12 (konvertiert auch p210le etc.) →
+        // hwupload → scale_cuda → NVENC.
+        if let Some(res) = resolution {
+            args.push("-vf".to_string());
+            args.push(format!("format=nv12,hwupload,scale_cuda={res}"));
+        } else {
+            // Kein Scale, aber Format-Konvertierung fuer exotische Pixelformate.
+            args.push("-vf".to_string());
+            args.push("format=nv12".to_string());
+        }
     }
 }
 
