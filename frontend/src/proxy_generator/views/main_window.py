@@ -41,7 +41,7 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".r
 
 _STATUS_LABELS = {
     JobStatus.QUEUED: "Wartend",
-    JobStatus.RUNNING: "Laeuft",
+    JobStatus.RUNNING: "Läuft",
     JobStatus.DONE: "Fertig",
     JobStatus.ERROR: "Fehler",
     JobStatus.CANCELLED: "Abgebrochen",
@@ -89,11 +89,11 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        self._act_add_files = QAction("Dateien hinzufuegen", self)
+        self._act_add_files = QAction("Dateien hinzufügen", self)
         self._act_add_files.triggered.connect(self._on_add_files)
         tb.addAction(self._act_add_files)
 
-        self._act_add_folder = QAction("Ordner hinzufuegen", self)
+        self._act_add_folder = QAction("Ordner hinzufügen", self)
         self._act_add_folder.triggered.connect(self._on_add_folder)
         tb.addAction(self._act_add_folder)
 
@@ -152,10 +152,10 @@ class MainWindow(QMainWindow):
         grp_output = QGroupBox("Ausgabe")
         gl = QHBoxLayout(grp_output)
         self._output_dir_edit = QLineEdit()
-        self._output_dir_edit.setPlaceholderText("Ausgabe-Ordner waehlen...")
+        self._output_dir_edit.setPlaceholderText("Ausgabe-Ordner wählen...")
         self._output_dir_edit.setText(str(Path.home()))
         gl.addWidget(self._output_dir_edit)
-        btn_browse = QPushButton("Waehlen")
+        btn_browse = QPushButton("Wählen")
         btn_browse.clicked.connect(self._on_browse_output)
         gl.addWidget(btn_browse)
         layout.addWidget(grp_output)
@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
         self._grp_proxy = QGroupBox("Proxy-Einstellungen")
         pl = QVBoxLayout(self._grp_proxy)
 
-        pl.addWidget(QLabel("Aufloesung:"))
+        pl.addWidget(QLabel("Auflösung:"))
         self._combo_resolution = QComboBox()
         self._combo_resolution.addItems(["Original", "1/2", "1/4", "1/8"])
         pl.addWidget(self._combo_resolution)
@@ -236,14 +236,14 @@ class MainWindow(QMainWindow):
     def _on_add_files(self) -> None:
         exts = " ".join(f"*{e}" for e in sorted(VIDEO_EXTENSIONS))
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Videodateien auswaehlen", "",
+            self, "Videodateien auswählen", "",
             f"Videodateien ({exts});;Alle Dateien (*)",
         )
         if paths:
             self._submit_jobs(paths)
 
     def _on_add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Ordner auswaehlen")
+        folder = QFileDialog.getExistingDirectory(self, "Ordner auswählen")
         if not folder:
             return
         paths = []
@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
             return
         if not self._vm.jobs:
             QMessageBox.information(self, "Queue leer",
-                "Bitte zuerst Dateien ueber 'Dateien hinzufuegen' hinzufuegen.")
+                "Bitte zuerst Dateien über 'Dateien hinzufügen' hinzufügen.")
             return
 
         # Einstellungen zum Startzeitpunkt lesen – nicht die vom Zeitpunkt
@@ -305,7 +305,7 @@ class MainWindow(QMainWindow):
         self._vm.clear_done()
 
     def _on_browse_output(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Ausgabe-Ordner waehlen")
+        folder = QFileDialog.getExistingDirectory(self, "Ausgabe-Ordner wählen")
         if folder:
             self._output_dir_edit.setText(folder)
 
@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
 
         output_dir = self._output_dir_edit.text().strip()
         if not output_dir:
-            QMessageBox.warning(self, "Ausgabe-Ordner", "Bitte einen Ausgabe-Ordner waehlen.")
+            QMessageBox.warning(self, "Ausgabe-Ordner", "Bitte einen Ausgabe-Ordner wählen.")
             return
         if not os.path.isdir(output_dir):
             QMessageBox.warning(self, "Ausgabe-Ordner", f"Ordner existiert nicht:\n{output_dir}")
@@ -402,10 +402,10 @@ class MainWindow(QMainWindow):
         added = count_after - count_before
         if added == 0 and paths:
             QMessageBox.warning(self, "Fehler",
-                "Keine Jobs konnten hinzugefuegt werden.\nPruefen Sie ob das Backend laeuft.")
+                "Keine Jobs konnten hinzugefügt werden.\nPrüfen Sie ob das Backend läuft.")
         elif added < len(paths):
             self._statusbar.showMessage(
-                f"{added} von {len(paths)} Jobs hinzugefuegt.", 5000)
+                f"{added} von {len(paths)} Jobs hinzugefügt.", 5000)
 
     # -- table management -------------------------------------------------------
 
