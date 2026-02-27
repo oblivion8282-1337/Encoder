@@ -70,8 +70,9 @@ pub fn build_ffmpeg_args(
             "nvenc" => {
                 args.push("-hwaccel".to_string());
                 args.push("cuda".to_string());
-                // Frames in CUDA-Memory halten wenn skaliert → scale_cuda moeglich
-                if options.proxy_resolution.is_some() {
+                // AV1 NVENC akzeptiert keine CUDA-Frames direkt → kein hwaccel_output_format
+                // H.264/H.265 NVENC: Frames in CUDA-Memory halten wenn skaliert → scale_cuda
+                if options.proxy_resolution.is_some() && options.proxy_codec != "av1" {
                     args.push("-hwaccel_output_format".to_string());
                     args.push("cuda".to_string());
                 }
@@ -161,7 +162,8 @@ fn push_proxy_codec_args(
         // ── AV1 ────────────────────────────────────────────────────────────
         "av1" => match hw_accel {
             "vaapi" => push_vaapi(args, "av1_vaapi", resolution),
-            "nvenc" => push_nvenc(args, "av1_nvenc", "63", resolution), // AV1 QP-Skala 0-255
+            // AV1 NVENC: braucht yuv420p (keine CUDA-Frames) + SW-scale statt scale_cuda
+            "nvenc" => push_nvenc_av1(args, resolution),
             _       => push_sw_av1(args, resolution),
         },
         // ── ProRes ─────────────────────────────────────────────────────────
@@ -201,6 +203,25 @@ fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<
     if let Some(res) = resolution {
         args.push("-vf".to_string());
         args.push(format!("scale_cuda={res}"));
+    }
+}
+
+/// AV1 NVENC: braucht Systemspeicher-Frames (kein CUDA-Input) und yuv420p.
+/// Skalierung daher via Software-scale, nicht scale_cuda.
+fn push_nvenc_av1(args: &mut Vec<String>, resolution: Option<&str>) {
+    args.push("-c:v".to_string());
+    args.push("av1_nvenc".to_string());
+    args.push("-preset".to_string());
+    args.push("p4".to_string());
+    args.push("-rc".to_string());
+    args.push("constqp".to_string());
+    args.push("-qp".to_string());
+    args.push("63".to_string());
+    args.push("-pix_fmt".to_string());
+    args.push("yuv420p".to_string());
+    if let Some(res) = resolution {
+        args.push("-vf".to_string());
+        args.push(format!("scale={res}"));
     }
 }
 
