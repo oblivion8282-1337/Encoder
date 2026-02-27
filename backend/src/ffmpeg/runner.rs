@@ -70,8 +70,12 @@ pub fn build_ffmpeg_args(
             "nvenc" => {
                 args.push("-hwaccel".to_string());
                 args.push("cuda".to_string());
-                // Keine hwaccel_output_format: Skalierung erfolgt CPU-seitig (scale-Filter),
-                // NVENC-Encode akzeptiert CPU-Frames direkt ueber die NVENC-API.
+                // AV1 NVENC akzeptiert keine CUDA-Frames → kein hwaccel_output_format
+                // H.264/H.265 NVENC: Frames in CUDA-Memory halten wenn skaliert → scale_cuda
+                if options.proxy_resolution.is_some() && options.proxy_codec != "av1" {
+                    args.push("-hwaccel_output_format".to_string());
+                    args.push("cuda".to_string());
+                }
             }
             _ => {}
         }
@@ -170,7 +174,7 @@ fn push_proxy_codec_args(
 }
 
 /// VAAPI-Encoder (h264_vaapi / hevc_vaapi / av1_vaapi).
-/// Skalierung per SW-scale, danach hwupload in VAAPI-Memory.
+/// Benoetigt format=nv12,hwupload fuer den Video-Filter.
 fn push_vaapi(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
     args.push("-c:v".to_string());
     args.push(codec.to_string());
@@ -180,14 +184,13 @@ fn push_vaapi(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
     args.push("23".to_string());
     args.push("-vf".to_string());
     match resolution {
-        Some(res) => args.push(format!("scale={res},format=nv12,hwupload")),
+        Some(res) => args.push(format!("format=nv12,hwupload,scale_vaapi={res}")),
         None      => args.push("format=nv12,hwupload".to_string()),
     }
 }
 
 /// NVENC-Encoder (h264_nvenc / hevc_nvenc).
-/// CUDA-Decode (hwaccel cuda), CPU-seitige Skalierung per scale-Filter,
-/// NVENC-API akzeptiert CPU-Frames direkt.
+/// scale_cuda fuer GPU-seitige Skalierung (Frames bleiben in CUDA-Memory).
 fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<&str>) {
     args.push("-c:v".to_string());
     args.push(codec.to_string());
@@ -199,7 +202,7 @@ fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<
     args.push(qp.to_string());
     if let Some(res) = resolution {
         args.push("-vf".to_string());
-        args.push(format!("scale={res}"));
+        args.push(format!("scale_cuda={res}"));
     }
 }
 
