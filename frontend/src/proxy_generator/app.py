@@ -7,7 +7,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import QMessageBox
 
-from proxy_generator.ipc.client import IpcClient, _find_backend_binary
+from proxy_generator.ipc.client import IpcClient, find_backend_binary
 from proxy_generator.viewmodels.queue_viewmodel import QueueViewModel
 from proxy_generator.views.main_window import MainWindow
 
@@ -19,7 +19,7 @@ def create_app() -> Optional[MainWindow]:
 
     Returns None if the backend binary cannot be found (shows error dialog).
     """
-    backend_path = _find_backend_binary()
+    backend_path = find_backend_binary()
 
     # Check if backend binary is reachable
     if not _backend_available(backend_path):

@@ -43,7 +43,7 @@ fn normalize_resolution(res: &str) -> String {
 ///
 /// Argument-Reihenfolge ist kritisch:
 /// 1. -y (overwrite)
-/// 2. HW-Accel Flags VOR -i (vaapi_device, hwaccel cuda)
+/// 2. HW-Accel Flags VOR -i (vaapi_device fuer VAAPI)
 /// 3. -loglevel warning
 /// 4. -i INPUT
 /// 5. Mapping + Codec-Optionen
@@ -106,6 +106,8 @@ pub fn build_ffmpeg_args(
                 "vaapi" => {
                     args.push("-c:v".to_string());
                     args.push("h264_vaapi".to_string());
+                    args.push("-rc_mode".to_string());
+                    args.push("CQP".to_string());
                     args.push("-qp".to_string());
                     args.push("23".to_string());
 

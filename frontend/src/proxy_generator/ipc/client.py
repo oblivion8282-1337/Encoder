@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Generator, Optional
 
@@ -48,6 +47,11 @@ def _find_backend_binary() -> str:
 
     # Fallback: assume on PATH
     return "proxy-generator-backend"
+
+
+def find_backend_binary() -> str:
+    """Public wrapper: Locate the backend binary. See _find_backend_binary for details."""
+    return _find_backend_binary()
 
 
 class IpcClient:

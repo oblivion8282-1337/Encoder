@@ -340,7 +340,26 @@ pub async fn run_queue(
                         }
                     }
 
-                    let _ = ffmpeg_handle.await;
+                    match ffmpeg_handle.await {
+                        Ok(Ok(())) => {}  // Normale Beendigung: terminales Event wurde bereits gesendet
+                        Ok(Err(e)) => {
+                            // run_ffmpeg schlug fehl ohne Event zu senden (z.B. ffmpeg nicht gefunden)
+                            let _ = resp_tx.send(Response::JobError {
+                                id: job_id.clone(),
+                                message: format!("FFmpeg konnte nicht ausgefuehrt werden: {e}"),
+                            }).await;
+                        }
+                        Err(e) => {
+                            // FFmpeg-Task panikt (sehr selten)
+                            let _ = resp_tx.send(Response::JobError {
+                                id: job_id.clone(),
+                                message: format!("FFmpeg-Task Panik: {e}"),
+                            }).await;
+                        }
+                    }
+
+                    // Job aus HashMap entfernen (terminaler Zustand erreicht)
+                    jobs_ref.write().await.remove(&job_id);
                 });
 
                 // Monitor: wenn der Job-Task panikt → JobError an Python senden

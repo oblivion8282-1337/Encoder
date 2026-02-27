@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QModelIndex, QSettings
+from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -25,7 +25,6 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
-    QSizePolicy,
     QSpinBox,
     QSplitter,
     QStatusBar,
