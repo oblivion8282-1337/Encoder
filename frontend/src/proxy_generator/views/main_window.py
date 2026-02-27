@@ -340,8 +340,9 @@ class MainWindow(QMainWindow):
             hw_accel=hw_accel,
         )
 
-        # TODO: Backend unterstuetzt set_parallel_jobs noch nicht (kein Request-Typ in protocol.rs).
-        # self._vm.set_parallel_jobs(self._spin_parallel.value())
+        # TODO: Parallele Jobs werden aktuell ignoriert – der SpinBox-Wert
+        # wird nicht ans Backend uebergeben. Dazu muss set_parallel_jobs
+        # in Rust (protocol.rs + server.rs + run_queue) implementiert werden.
         count_before = len(self._vm.jobs)
         self._vm.add_files(paths, output_dir, mode, options)
         count_after = len(self._vm.jobs)
@@ -441,7 +442,10 @@ class MainWindow(QMainWindow):
         idx = self._combo_hw.findText(hw)
         if idx >= 0:
             self._combo_hw.setCurrentIndex(idx)
-        parallel = int(self._settings.value("parallel_jobs", 1))
+        try:
+            parallel = int(self._settings.value("parallel_jobs", 1))
+        except (ValueError, TypeError):
+            parallel = 1
         self._spin_parallel.setValue(parallel)
 
     def _save_settings(self) -> None:
