@@ -85,11 +85,11 @@ pub fn build_ffmpeg_args(
     args.push("-map".to_string());
     args.push("0:a".to_string());
 
-    // Metadata und Timecode (tmcd/data track)
+    // Globale Metadaten uebernehmen (Timecode etc. auf Container-Ebene)
     args.push("-map_metadata".to_string());
     args.push("0".to_string());
-    args.push("-map".to_string());
-    args.push("0:d?".to_string());
+    // Hinweis: -map 0:d? wurde entfernt – Sony FX MXF enthaelt smpte_436m_anc
+    // als Data-Track, den der MOV-Container nicht unterstuetzt.
 
     // Modus-spezifische Codecs
     match mode {
