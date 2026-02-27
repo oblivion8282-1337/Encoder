@@ -150,9 +150,11 @@ class QueueViewModel(QObject):
         """Stop the worker and the backend."""
         if self._worker is not None:
             self._worker.stop()
+        # Backend zuerst beenden: schliesst stdout → Worker-Thread kehrt sofort zurueck
+        self._client.stop()
+        if self._worker is not None:
             QThreadPool.globalInstance().waitForDone(3000)
             self._worker = None
-        self._client.stop()
 
     # -- slots from worker signals ----------------------------------------------
 
