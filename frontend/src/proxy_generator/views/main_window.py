@@ -263,7 +263,40 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Queue leer",
                 "Bitte zuerst Dateien ueber 'Dateien hinzufuegen' hinzufuegen.")
             return
-        self._vm.start_all()
+
+        # Einstellungen zum Startzeitpunkt lesen – nicht die vom Zeitpunkt
+        # des Hinzufuegens – damit Aenderungen an Codec/Aufloesung wirken.
+        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+
+        resolution_map = {
+            "Original": None,
+            "1/2": "iw/2:-2",
+            "1/4": "iw/4:-2",
+            "1/8": "iw/8:-2",
+        }
+        proxy_resolution = resolution_map.get(self._combo_resolution.currentText())
+
+        codec_map = {
+            "H.264": "h264",
+            "H.265": "h265",
+            "AV1": "av1",
+            "ProRes 422 Proxy": "prores_proxy",
+            "ProRes 422 LT": "prores_lt",
+            "ProRes 422": "prores_422",
+            "ProRes 422 HQ": "prores_hq",
+        }
+        proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
+
+        hw_map = {"Keins": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}
+        hw_accel = hw_map.get(self._combo_hw.currentText(), "none")
+
+        options = JobOptions(
+            proxy_resolution=proxy_resolution,
+            proxy_codec=proxy_codec,
+            hw_accel=hw_accel,
+        )
+
+        self._vm.start_all(mode, options)
         self._statusbar.showMessage("Jobs gestartet.", 3000)
 
     def _on_clear_done(self) -> None:

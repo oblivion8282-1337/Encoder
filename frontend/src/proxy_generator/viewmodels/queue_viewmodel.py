@@ -70,14 +70,24 @@ class QueueViewModel(QObject):
             self._order.append(job.id)
         self.jobs_changed.emit()
 
-    def start_all(self) -> None:
-        """Alle lokal wartenden Jobs ans Backend senden und starten."""
+    def start_all(self, mode: JobMode, options: JobOptions) -> None:
+        """Alle lokal wartenden Jobs ans Backend senden und starten.
+
+        mode und options werden zum Startzeitpunkt aus der UI gelesen und auf
+        alle noch nicht gesendeten Jobs angewendet – so wirken Aenderungen
+        an Codec, Aufloesung oder HW-Accel auch dann, wenn sie nach dem
+        Hinzufuegen der Dateien vorgenommen wurden.
+        """
         for job_id in list(self._order):
             job = self._jobs.get(job_id)
             if job is None or job_id in self._submitted:
                 continue
             if job.status != JobStatus.QUEUED:
                 continue
+            # Aktuelle UI-Einstellungen ueberschreiben die Werte vom Zeitpunkt
+            # des Hinzufuegens (Aufloesung, Codec, HW-Accel, Modus).
+            job.mode = mode
+            job.options = options
             try:
                 self._client.add_job(job)
                 self._submitted.add(job_id)
