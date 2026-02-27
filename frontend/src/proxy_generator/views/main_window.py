@@ -35,17 +35,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from proxy_generator.i18n import get_language, set_language, tr
 from proxy_generator.models.job import Job, JobMode, JobOptions, JobStatus
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".r3d", ".braw"}
-
-_STATUS_LABELS = {
-    JobStatus.QUEUED: "Wartend",
-    JobStatus.RUNNING: "Läuft",
-    JobStatus.DONE: "Fertig",
-    JobStatus.ERROR: "Fehler",
-    JobStatus.CANCELLED: "Abgebrochen",
-}
 
 # Table column indices
 COL_FILENAME = 0
@@ -56,6 +49,14 @@ COL_FPS = 4
 COL_SPEED = 5
 NUM_COLS = 6
 
+_STATUS_KEY = {
+    JobStatus.QUEUED:    "status.waiting",
+    JobStatus.RUNNING:   "status.running",
+    JobStatus.DONE:      "status.done",
+    JobStatus.ERROR:     "status.error",
+    JobStatus.CANCELLED: "status.cancelled",
+}
+
 
 class MainWindow(QMainWindow):
     """Hauptfenster des Proxy Generators."""
@@ -64,7 +65,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._vm = viewmodel  # set later via set_viewmodel if None
         self._settings = QSettings("proxy-generator", "ProxyGenerator")
-        self.setWindowTitle("Proxy Generator")
         self.setMinimumSize(1000, 650)
         self.setAcceptDrops(True)
 
@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self._build_central()
         self._build_statusbar()
         self._load_settings()
+        self.retranslate_ui()
 
         if self._vm is not None:
             self._connect_viewmodel()
@@ -89,25 +90,25 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        self._act_add_files = QAction("Dateien hinzufügen", self)
+        self._act_add_files = QAction("", self)
         self._act_add_files.triggered.connect(self._on_add_files)
         tb.addAction(self._act_add_files)
 
-        self._act_add_folder = QAction("Ordner hinzufügen", self)
+        self._act_add_folder = QAction("", self)
         self._act_add_folder.triggered.connect(self._on_add_folder)
         tb.addAction(self._act_add_folder)
 
         tb.addSeparator()
 
-        self._act_start = QAction("Alles starten", self)
+        self._act_start = QAction("", self)
         self._act_start.triggered.connect(self._on_start_all)
         tb.addAction(self._act_start)
 
-        self._act_clear = QAction("Fertige entfernen", self)
+        self._act_clear = QAction("", self)
         self._act_clear.triggered.connect(self._on_clear_done)
         tb.addAction(self._act_clear)
 
-        self._act_clear_all = QAction("Queue leeren", self)
+        self._act_clear_all = QAction("", self)
         self._act_clear_all.triggered.connect(
             lambda: self._vm.clear_all() if self._vm else None)
         tb.addAction(self._act_clear_all)
@@ -120,9 +121,7 @@ class MainWindow(QMainWindow):
 
         # Left: job table
         self._table = QTableWidget(0, NUM_COLS)
-        self._table.setHorizontalHeaderLabels([
-            "Dateiname", "Modus", "Status", "Fortschritt", "FPS", "Speed",
-        ])
+        self._table.setHorizontalHeaderLabels([""] * NUM_COLS)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -149,40 +148,41 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
 
         # -- Output directory ---------------------------------------------------
-        grp_output = QGroupBox("Ausgabe")
-        gl = QHBoxLayout(grp_output)
+        self._grp_output = QGroupBox("")
+        gl = QHBoxLayout(self._grp_output)
         self._output_dir_edit = QLineEdit()
-        self._output_dir_edit.setPlaceholderText("Ausgabe-Ordner wählen...")
         self._output_dir_edit.setText(str(Path.home()))
         gl.addWidget(self._output_dir_edit)
-        btn_browse = QPushButton("Wählen")
-        btn_browse.clicked.connect(self._on_browse_output)
-        gl.addWidget(btn_browse)
-        layout.addWidget(grp_output)
+        self._btn_browse = QPushButton("")
+        self._btn_browse.clicked.connect(self._on_browse_output)
+        gl.addWidget(self._btn_browse)
+        layout.addWidget(self._grp_output)
 
         # -- Mode ---------------------------------------------------------------
-        grp_mode = QGroupBox("Modus")
-        ml = QVBoxLayout(grp_mode)
+        self._grp_mode = QGroupBox("")
+        ml = QVBoxLayout(self._grp_mode)
         self._mode_group = QButtonGroup(self)
-        self._rb_rewrap = QRadioButton("Re-Wrap (nur Container)")
-        self._rb_proxy = QRadioButton("Proxy (Transkodierung)")
+        self._rb_rewrap = QRadioButton("")
+        self._rb_proxy = QRadioButton("")
         self._mode_group.addButton(self._rb_rewrap, 0)
         self._mode_group.addButton(self._rb_proxy, 1)
         self._rb_rewrap.setChecked(True)
         ml.addWidget(self._rb_rewrap)
         ml.addWidget(self._rb_proxy)
-        layout.addWidget(grp_mode)
+        layout.addWidget(self._grp_mode)
 
         # -- Proxy settings (only visible in proxy mode) ------------------------
-        self._grp_proxy = QGroupBox("Proxy-Einstellungen")
+        self._grp_proxy = QGroupBox("")
         pl = QVBoxLayout(self._grp_proxy)
 
-        pl.addWidget(QLabel("Auflösung:"))
+        self._lbl_resolution = QLabel("")
+        pl.addWidget(self._lbl_resolution)
         self._combo_resolution = QComboBox()
         self._combo_resolution.addItems(["Original", "1/2", "1/4", "1/8"])
         pl.addWidget(self._combo_resolution)
 
-        pl.addWidget(QLabel("Codec:"))
+        self._lbl_codec = QLabel("")
+        pl.addWidget(self._lbl_codec)
         self._combo_codec = QComboBox()
         self._combo_codec.addItems([
             "H.264", "H.265", "AV1",
@@ -196,21 +196,30 @@ class MainWindow(QMainWindow):
         self._mode_group.idToggled.connect(self._on_mode_changed)
 
         # -- Hardware encoding --------------------------------------------------
-        grp_hw = QGroupBox("Hardware-Encoding")
-        hl = QVBoxLayout(grp_hw)
+        self._grp_hw = QGroupBox("")
+        hl = QVBoxLayout(self._grp_hw)
         self._combo_hw = QComboBox()
-        self._combo_hw.addItems(["Keins", "NVENC (Nvidia)", "VAAPI (AMD/Intel)"])
+        self._combo_hw.addItems(["Keins / None", "NVENC (Nvidia)", "VAAPI (AMD/Intel)"])
         hl.addWidget(self._combo_hw)
-        layout.addWidget(grp_hw)
+        layout.addWidget(self._grp_hw)
 
         # -- Parallel jobs ------------------------------------------------------
-        grp_par = QGroupBox("Parallele Jobs")
-        prl = QVBoxLayout(grp_par)
+        self._grp_par = QGroupBox("")
+        prl = QVBoxLayout(self._grp_par)
         self._spin_parallel = QSpinBox()
         self._spin_parallel.setRange(1, 8)
         self._spin_parallel.setValue(1)
         prl.addWidget(self._spin_parallel)
-        layout.addWidget(grp_par)
+        layout.addWidget(self._grp_par)
+
+        # -- Language -----------------------------------------------------------
+        self._grp_lang = QGroupBox("")
+        ll = QVBoxLayout(self._grp_lang)
+        self._combo_lang = QComboBox()
+        self._combo_lang.addItems(["Deutsch", "English"])
+        self._combo_lang.currentIndexChanged.connect(self._on_language_changed)
+        ll.addWidget(self._combo_lang)
+        layout.addWidget(self._grp_lang)
 
         layout.addStretch()
         return container
@@ -220,8 +229,53 @@ class MainWindow(QMainWindow):
     def _build_statusbar(self) -> None:
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
-        self._status_label = QLabel("0 Jobs")
+        self._status_label = QLabel("")
         self._statusbar.addPermanentWidget(self._status_label)
+
+    # -- retranslate ------------------------------------------------------------
+
+    def retranslate_ui(self) -> None:
+        """Alle sichtbaren Texte in der aktuellen Sprache setzen."""
+        self.setWindowTitle("Proxy Generator")
+
+        # Toolbar
+        self._act_add_files.setText(tr("toolbar.add_files"))
+        self._act_add_folder.setText(tr("toolbar.add_folder"))
+        self._act_start.setText(tr("toolbar.start_all"))
+        self._act_clear.setText(tr("toolbar.clear_done"))
+        self._act_clear_all.setText(tr("toolbar.clear_all"))
+
+        # Table headers
+        self._table.setHorizontalHeaderLabels([
+            tr("table.filename"),
+            tr("table.mode"),
+            tr("table.status"),
+            tr("table.progress"),
+            tr("table.fps"),
+            tr("table.speed"),
+        ])
+
+        # Settings panel
+        self._grp_output.setTitle(tr("grp.output"))
+        self._output_dir_edit.setPlaceholderText(tr("placeholder.output"))
+        self._btn_browse.setText(tr("btn.browse"))
+        self._grp_mode.setTitle(tr("grp.mode"))
+        self._rb_rewrap.setText(tr("rb.rewrap"))
+        self._rb_proxy.setText(tr("rb.proxy"))
+        self._grp_proxy.setTitle(tr("grp.proxy"))
+        self._lbl_resolution.setText(tr("lbl.resolution"))
+        self._lbl_codec.setText(tr("lbl.codec"))
+        self._grp_hw.setTitle(tr("grp.hw"))
+        self._grp_par.setTitle(tr("grp.parallel"))
+        self._grp_lang.setTitle(tr("grp.lang"))
+
+        # ProRes tooltip (might currently be set)
+        self._on_codec_changed(self._combo_codec.currentText())
+
+        # Refresh table content (status/mode columns)
+        if self._vm is not None:
+            self._rebuild_table()
+        self._update_status_label()
 
     # -- connect viewmodel signals ----------------------------------------------
 
@@ -236,14 +290,16 @@ class MainWindow(QMainWindow):
     def _on_add_files(self) -> None:
         exts = " ".join(f"*{e}" for e in sorted(VIDEO_EXTENSIONS))
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Videodateien auswählen", "",
-            f"Videodateien ({exts});;Alle Dateien (*)",
+            self,
+            tr("fdlg.select_files"),
+            "",
+            f"{tr('fdlg.video_filter')} ({exts});;{tr('fdlg.all_files')} (*)",
         )
         if paths:
             self._submit_jobs(paths)
 
     def _on_add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Ordner auswählen")
+        folder = QFileDialog.getExistingDirectory(self, tr("fdlg.select_folder"))
         if not folder:
             return
         paths = []
@@ -254,18 +310,15 @@ class MainWindow(QMainWindow):
         if paths:
             self._submit_jobs(sorted(paths))
         else:
-            QMessageBox.information(self, "Keine Videos", "Keine Videodateien im Ordner gefunden.")
+            QMessageBox.information(self, tr("dlg.no_videos_title"), tr("dlg.no_videos_msg"))
 
     def _on_start_all(self) -> None:
         if self._vm is None:
             return
         if not self._vm.jobs:
-            QMessageBox.information(self, "Queue leer",
-                "Bitte zuerst Dateien über 'Dateien hinzufügen' hinzufügen.")
+            QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
             return
 
-        # Einstellungen zum Startzeitpunkt lesen – nicht die vom Zeitpunkt
-        # des Hinzufuegens – damit Aenderungen an Codec/Aufloesung wirken.
         mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
 
         resolution_map = {
@@ -287,7 +340,11 @@ class MainWindow(QMainWindow):
         }
         proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
 
-        hw_map = {"Keins": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}
+        hw_map = {
+            "Keins / None": "none",
+            "NVENC (Nvidia)": "nvenc",
+            "VAAPI (AMD/Intel)": "vaapi",
+        }
         hw_accel = hw_map.get(self._combo_hw.currentText(), "none")
 
         options = JobOptions(
@@ -297,7 +354,7 @@ class MainWindow(QMainWindow):
         )
 
         self._vm.start_all(mode, options)
-        self._statusbar.showMessage("Jobs gestartet.", 3000)
+        self._statusbar.showMessage(tr("statusbar.started"), 3000)
 
     def _on_clear_done(self) -> None:
         if self._vm is None:
@@ -305,25 +362,27 @@ class MainWindow(QMainWindow):
         self._vm.clear_done()
 
     def _on_browse_output(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Ausgabe-Ordner wählen")
+        folder = QFileDialog.getExistingDirectory(self, tr("fdlg.output_folder"))
         if folder:
             self._output_dir_edit.setText(folder)
 
     def _on_codec_changed(self, text: str) -> None:
         is_prores = text.startswith("ProRes")
         self._combo_hw.setEnabled(not is_prores)
-        if is_prores:
-            self._combo_hw.setToolTip("ProRes wird immer per CPU enkodiert.")
-        else:
-            self._combo_hw.setToolTip("")
+        self._combo_hw.setToolTip(tr("tooltip.prores_cpu") if is_prores else "")
 
     def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
             if button_id == -1:
-                # Called directly (e.g. from _load_settings) - check current state
                 self._grp_proxy.setVisible(self._rb_proxy.isChecked())
             else:
                 self._grp_proxy.setVisible(button_id == 1)
+
+    def _on_language_changed(self, index: int) -> None:
+        lang = "de" if index == 0 else "en"
+        set_language(lang)
+        self._settings.setValue("language", lang)
+        self.retranslate_ui()
 
     # -- context menu -----------------------------------------------------------
 
@@ -332,8 +391,8 @@ class MainWindow(QMainWindow):
         if row < 0:
             return
         menu = QMenu(self)
-        act_cancel = menu.addAction("Abbrechen")
-        act_remove = menu.addAction("Entfernen")
+        act_cancel = menu.addAction(tr("ctx.cancel"))
+        act_remove = menu.addAction(tr("ctx.remove"))
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action is None or self._vm is None:
             return
@@ -354,13 +413,15 @@ class MainWindow(QMainWindow):
 
         output_dir = self._output_dir_edit.text().strip()
         if not output_dir:
-            QMessageBox.warning(self, "Ausgabe-Ordner", "Bitte einen Ausgabe-Ordner wählen.")
+            QMessageBox.warning(self, tr("dlg.output_title"), tr("dlg.output_choose"))
             return
         if not os.path.isdir(output_dir):
-            QMessageBox.warning(self, "Ausgabe-Ordner", f"Ordner existiert nicht:\n{output_dir}")
+            QMessageBox.warning(self, tr("dlg.output_title"),
+                                tr("dlg.output_not_found") + output_dir)
             return
         if not os.access(output_dir, os.W_OK):
-            QMessageBox.warning(self, "Ausgabe-Ordner", f"Kein Schreibzugriff auf:\n{output_dir}")
+            QMessageBox.warning(self, tr("dlg.output_title"),
+                                tr("dlg.output_no_write") + output_dir)
             return
 
         mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
@@ -384,7 +445,11 @@ class MainWindow(QMainWindow):
         }
         proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
 
-        hw_map = {"Keins": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}
+        hw_map = {
+            "Keins / None": "none",
+            "NVENC (Nvidia)": "nvenc",
+            "VAAPI (AMD/Intel)": "vaapi",
+        }
         hw_accel = hw_map.get(self._combo_hw.currentText(), "none")
 
         options = JobOptions(
@@ -393,19 +458,15 @@ class MainWindow(QMainWindow):
             hw_accel=hw_accel,
         )
 
-        # TODO: Parallele Jobs werden aktuell ignoriert – der SpinBox-Wert
-        # wird nicht ans Backend uebergeben. Dazu muss set_parallel_jobs
-        # in Rust (protocol.rs + server.rs + run_queue) implementiert werden.
         count_before = len(self._vm.jobs)
         self._vm.add_files(paths, output_dir, mode, options)
         count_after = len(self._vm.jobs)
         added = count_after - count_before
         if added == 0 and paths:
-            QMessageBox.warning(self, "Fehler",
-                "Keine Jobs konnten hinzugefügt werden.\nPrüfen Sie ob das Backend läuft.")
+            QMessageBox.warning(self, tr("dlg.error_title"), tr("dlg.no_jobs_added"))
         elif added < len(paths):
             self._statusbar.showMessage(
-                f"{added} von {len(paths)} Jobs hinzugefügt.", 5000)
+                tr("statusbar.added").format(added=added, total=len(paths)), 5000)
 
     # -- table management -------------------------------------------------------
 
@@ -433,7 +494,7 @@ class MainWindow(QMainWindow):
     def _set_row(self, row: int, job: Job) -> None:
         filename = Path(job.input_path).name
         mode_label = "Re-Wrap" if job.mode == JobMode.REWRAP else "Proxy"
-        status_label = _STATUS_LABELS.get(job.status, str(job.status))
+        status_label = tr(_STATUS_KEY.get(job.status, "status.error"))
 
         self._table.setItem(row, COL_FILENAME, QTableWidgetItem(filename))
         self._table.setItem(row, COL_MODE, QTableWidgetItem(mode_label))
@@ -465,12 +526,14 @@ class MainWindow(QMainWindow):
 
     def _update_status_label(self) -> None:
         if self._vm is None:
+            self._status_label.setText("")
             return
         jobs = self._vm.jobs
         total = len(jobs)
         running = sum(1 for j in jobs if j.status == JobStatus.RUNNING)
         done = sum(1 for j in jobs if j.status == JobStatus.DONE)
-        self._status_label.setText(f"{total} Jobs | {running} laufen | {done} fertig")
+        self._status_label.setText(
+            tr("statusbar.summary").format(total=total, running=running, done=done))
 
     # -- settings persistence ---------------------------------------------------
 
@@ -483,7 +546,7 @@ class MainWindow(QMainWindow):
         else:
             self._rb_rewrap.setChecked(True)
         self._on_mode_changed()
-        res = self._settings.value("proxy_resolution", "Beibehalten")
+        res = self._settings.value("proxy_resolution", "Original")
         idx = self._combo_resolution.findText(res)
         if idx >= 0:
             self._combo_resolution.setCurrentIndex(idx)
@@ -491,7 +554,7 @@ class MainWindow(QMainWindow):
         idx = self._combo_codec.findText(codec)
         if idx >= 0:
             self._combo_codec.setCurrentIndex(idx)
-        hw = self._settings.value("hw_accel", "Keins")
+        hw = self._settings.value("hw_accel", "Keins / None")
         idx = self._combo_hw.findText(hw)
         if idx >= 0:
             self._combo_hw.setCurrentIndex(idx)
@@ -500,6 +563,13 @@ class MainWindow(QMainWindow):
         except (ValueError, TypeError):
             parallel = 1
         self._spin_parallel.setValue(parallel)
+        # Language (must be loaded before retranslate_ui is called)
+        lang = self._settings.value("language", "de")
+        set_language(lang)
+        lang_idx = 0 if lang == "de" else 1
+        self._combo_lang.blockSignals(True)
+        self._combo_lang.setCurrentIndex(lang_idx)
+        self._combo_lang.blockSignals(False)
 
     def _save_settings(self) -> None:
         self._settings.setValue("output_dir", self._output_dir_edit.text())
@@ -511,6 +581,7 @@ class MainWindow(QMainWindow):
                                 self._combo_codec.currentText())
         self._settings.setValue("hw_accel", self._combo_hw.currentText())
         self._settings.setValue("parallel_jobs", self._spin_parallel.value())
+        self._settings.setValue("language", get_language())
 
     # -- drag & drop ------------------------------------------------------------
 
@@ -543,8 +614,8 @@ class MainWindow(QMainWindow):
         if job.status == JobStatus.ERROR and job.error:
             QMessageBox.warning(
                 self,
-                "Job-Fehler",
-                f"Datei: {Path(job.input_path).name}\n\nFehler:\n{job.error}",
+                tr("dlg.job_error_title"),
+                f"{Path(job.input_path).name}\n\n{job.error}",
             )
 
     # -- cleanup ----------------------------------------------------------------
