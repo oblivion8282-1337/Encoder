@@ -48,14 +48,6 @@ class GetStatusRequest:
 
 
 @dataclass
-class SetParallelJobsRequest:
-    count: int
-
-    def to_dict(self) -> dict:
-        return {"type": "set_parallel_jobs", "count": self.count}
-
-
-@dataclass
 class ShutdownRequest:
     def to_dict(self) -> dict:
         return {"type": "shutdown"}

@@ -14,7 +14,6 @@ from proxy_generator.ipc.protocol import (
     AddJobRequest,
     CancelJobRequest,
     GetStatusRequest,
-    SetParallelJobsRequest,
     ShutdownRequest,
     parse_response,
 )
@@ -115,10 +114,6 @@ class IpcClient:
             options=options,
         )
         self._send_message(req.to_dict())
-
-    def set_parallel_jobs(self, count: int) -> None:
-        """Send a set_parallel_jobs request."""
-        self._send_message(SetParallelJobsRequest(count=count).to_dict())
 
     def cancel_job(self, job_id: str) -> None:
         """Send a cancel_job request."""

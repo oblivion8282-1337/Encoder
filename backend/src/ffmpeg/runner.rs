@@ -67,8 +67,6 @@ pub fn build_ffmpeg_args(
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
-            "nvenc" => {}
-
             _ => {}
         }
     }

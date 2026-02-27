@@ -36,13 +36,6 @@ class QueueViewModel(QObject):
     def jobs(self) -> list[Job]:
         return [self._jobs[jid] for jid in self._order if jid in self._jobs]
 
-    def set_parallel_jobs(self, count: int) -> None:
-        """Send the parallel jobs setting to the backend."""
-        try:
-            self._client.set_parallel_jobs(count)
-        except (RuntimeError, BrokenPipeError, OSError) as e:
-            log.error("Failed to set parallel jobs: %s", e)
-
     def add_files(
         self,
         paths: list[str],

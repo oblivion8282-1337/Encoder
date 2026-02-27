@@ -210,7 +210,6 @@ pub async fn run_queue(
                                 message: "Quelldatei konnte nicht gelesen werden (ffprobe fehlgeschlagen)".to_string(),
                             })
                             .await;
-                        jobs.write().await.remove(&job_id);
                         continue;
                     }
                 };
