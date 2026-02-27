@@ -84,8 +84,8 @@ pub async fn read_stdin(
 }
 
 /// Schreibt Response-Events als NDJSON auf stdout.
-/// Laeuft als eigener Task.
-pub async fn write_stdout(mut rx: mpsc::Receiver<Response>) {
+/// Laeuft als eigener Task. Gibt Fehler zurueck wenn die stdout-Pipe geschlossen wird.
+pub async fn write_stdout(mut rx: mpsc::Receiver<Response>) -> Result<()> {
     let stdout = tokio::io::stdout();
     let mut writer = BufWriter::new(stdout);
 
@@ -98,14 +98,10 @@ pub async fn write_stdout(mut rx: mpsc::Receiver<Response>) {
             }
         };
 
-        if writer.write_all(json.as_bytes()).await.is_err() {
-            break;
-        }
-        if writer.write_all(b"\n").await.is_err() {
-            break;
-        }
-        if writer.flush().await.is_err() {
-            break;
-        }
+        writer.write_all(json.as_bytes()).await?;
+        writer.write_all(b"\n").await?;
+        writer.flush().await?;
     }
+
+    Ok(())
 }

@@ -236,8 +236,9 @@ pub async fn run_queue(
                 let sem = semaphore.clone();
                 let resp_tx = response_tx.clone();
                 let jobs_ref = jobs.clone();
+                let job_id_for_monitor = job_id.clone();
 
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     // Warten bis ein Slot frei ist
                     let _permit = match sem.acquire().await {
                         Ok(p) => p,
@@ -337,6 +338,18 @@ pub async fn run_queue(
                     }
 
                     let _ = ffmpeg_handle.await;
+                });
+
+                // Monitor: wenn der Job-Task panikt → JobError an Python senden
+                let monitor_tx = response_tx.clone();
+                let monitor_id = job_id_for_monitor;
+                tokio::spawn(async move {
+                    if let Err(e) = handle.await {
+                        let _ = monitor_tx.send(Response::JobError {
+                            id: monitor_id,
+                            message: format!("Job-Task-Panik: {e}"),
+                        }).await;
+                    }
                 });
             }
             JobCommand::Cancel(id) => {

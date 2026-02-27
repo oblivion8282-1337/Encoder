@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
         pl.addWidget(QLabel("Aufloesung:"))
         self._combo_resolution = QComboBox()
         self._combo_resolution.addItems([
-            "Beibehalten", "1920x1080", "1280x720", "960x540",
+            "Beibehalten", "1920:1080", "1280:720", "960:540",
         ])
         pl.addWidget(self._combo_resolution)
 
@@ -375,6 +375,11 @@ class MainWindow(QMainWindow):
         status_item = QTableWidgetItem(status_label)
         if job.status == JobStatus.ERROR:
             status_item.setToolTip(job.error or "")
+            status_item.setForeground(Qt.GlobalColor.red)
+        elif job.status == JobStatus.DONE:
+            status_item.setForeground(Qt.GlobalColor.darkGreen)
+        elif job.status == JobStatus.CANCELLED:
+            status_item.setForeground(Qt.GlobalColor.gray)
         self._table.setItem(row, COL_STATUS, status_item)
 
         # Progress bar

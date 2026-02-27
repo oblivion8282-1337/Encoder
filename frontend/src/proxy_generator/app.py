@@ -2,6 +2,7 @@
 
 import logging
 import shutil
+import time
 from typing import Optional
 
 from PyQt6.QtWidgets import QMessageBox
@@ -40,6 +41,16 @@ def create_app() -> Optional[MainWindow]:
             None,
             "Backend-Startfehler",
             f"Das Backend konnte nicht gestartet werden:\n\n{exc}",
+        )
+        return None
+
+    time.sleep(0.2)
+    if not client.is_running:
+        QMessageBox.critical(
+            None,
+            "Backend-Fehler",
+            "Das Backend ist sofort abgestuerzt.\n"
+            "Bitte pruefe die Installation.",
         )
         return None
 

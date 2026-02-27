@@ -52,6 +52,12 @@ class QueueViewModel(QObject):
     ) -> None:
         """Create Job objects for each path and send them to the backend."""
         for p in paths:
+            if not os.path.isfile(p):
+                log.warning("Datei nicht gefunden: %s", p)
+                continue
+            if not os.access(p, os.R_OK):
+                log.warning("Keine Leseberechtigung: %s", p)
+                continue
             job = Job(
                 input_path=p,
                 output_dir=output_dir,
@@ -75,6 +81,7 @@ class QueueViewModel(QObject):
         self._worker.signals.job_done.connect(self._on_done)
         self._worker.signals.job_error.connect(self._on_error)
         self._worker.signals.job_queued.connect(self._on_queued)
+        self._worker.signals.job_cancelled.connect(self._on_cancelled)
         self._worker.signals.connection_lost.connect(self._on_connection_lost)
         QThreadPool.globalInstance().start(self._worker)
 
@@ -143,6 +150,12 @@ class QueueViewModel(QObject):
         job.progress = 100.0
         self.job_updated.emit(job_id)
 
+    def _on_cancelled(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = JobStatus.CANCELLED
+            self.job_updated.emit(job_id)
+
     def _on_error(self, job_id: str, message: str) -> None:
         job = self._jobs.get(job_id)
         if job is None:
@@ -163,6 +176,7 @@ class QueueViewModel(QObject):
                 self._worker.signals.job_done.disconnect()
                 self._worker.signals.job_error.disconnect()
                 self._worker.signals.job_queued.disconnect()
+                self._worker.signals.job_cancelled.disconnect()
                 self._worker.signals.connection_lost.disconnect()
             except RuntimeError:
                 pass  # already disconnected

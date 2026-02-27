@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 
 from proxy_generator.ipc.protocol import (
+    JobCancelledResponse,
     JobDoneResponse,
     JobErrorResponse,
     JobProgressResponse,
@@ -29,6 +30,7 @@ class WorkerSignals(QObject):
     job_done = pyqtSignal(str)                            # id
     job_error = pyqtSignal(str, str)                      # id, message
     job_queued = pyqtSignal(str)                          # id
+    job_cancelled = pyqtSignal(str)                       # id
     connection_lost = pyqtSignal()
 
 
@@ -71,6 +73,8 @@ class BackendWorker(QRunnable):
             self.signals.job_error.emit(response.id, response.message)
         elif isinstance(response, JobQueuedResponse):
             self.signals.job_queued.emit(response.id)
+        elif isinstance(response, JobCancelledResponse):
+            self.signals.job_cancelled.emit(response.id)
         elif isinstance(response, StatusReportResponse):
             pass  # could be handled if needed
         else:

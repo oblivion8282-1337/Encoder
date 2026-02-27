@@ -31,17 +31,23 @@ async fn main() -> Result<()> {
     let stdout_handle = tokio::spawn(ipc::server::write_stdout(response_rx));
 
     // Job-Queue Runner Task: Verarbeitet Job-Kommandos
+    let queue_resp_tx = response_tx.clone();
     let queue_handle = tokio::spawn(transcode::run_queue(
         cmd_rx,
         max_parallel,
-        response_tx.clone(),
+        queue_resp_tx,
         global_shutdown_token.clone(),
     ));
 
     // stdin-Reader Task: Liest Requests und dispatcht sie
-    let stdin_handle = tokio::spawn(ipc::server::read_stdin(queue, response_tx.clone(), shutdown_tx));
+    let stdin_resp_tx = response_tx.clone();
+    let stdin_handle = tokio::spawn(ipc::server::read_stdin(queue.clone(), stdin_resp_tx, shutdown_tx));
+    let stdin_abort = stdin_handle.abort_handle();
 
-    // Auf Shutdown warten (entweder via Shutdown-Request oder stdin EOF)
+    // stdout-Writer AbortHandle fuer spaetere Bereinigung
+    let stdout_abort = stdout_handle.abort_handle();
+
+    // Auf Shutdown warten (entweder via Shutdown-Request, stdin EOF, oder stdout-Fehler)
     tokio::select! {
         _ = shutdown_rx => {
             eprintln!("Shutdown-Signal empfangen, beende...");
@@ -51,17 +57,38 @@ async fn main() -> Result<()> {
                 eprintln!("stdin-Handler Fehler: {e}");
             }
         }
+        result = stdout_handle => {
+            match result {
+                Ok(Err(e)) => eprintln!("stdout-Writer Fehler: {e} — beende..."),
+                Err(e) => eprintln!("stdout-Writer Task Fehler: {e} — beende..."),
+                Ok(Ok(())) => eprintln!("stdout-Writer beendet — beende..."),
+            }
+        }
     }
 
-    // Aufraemen: Alle laufenden FFmpeg-Prozesse via CancellationToken beenden
+    // --- Graceful Shutdown ---
+
+    // 1. Alle laufenden FFmpeg-Prozesse via CancellationToken beenden
     global_shutdown_token.cancel();
 
-    // Kurz warten damit laufende Jobs sauber beendet werden koennen
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    // 2. stdin-Reader abbrechen (haelt Arc<JobQueue>, muss weg damit cmd_tx geschlossen wird)
+    stdin_abort.abort();
 
-    // Tasks beenden
-    queue_handle.abort();
-    stdout_handle.abort();
+    // 3. Channels schliessen damit Tasks sauber beenden
+    //    queue (Arc<JobQueue>) droppen → letzter cmd_tx Ref → run_queue() beendet sich
+    drop(queue);
+    //    response_tx droppen → write_stdout() beendet sich wenn rx leer
+    drop(response_tx);
+
+    // 4. Auf sauberes Beenden der Queue warten (mit Timeout-Fallback)
+    let timeout = tokio::time::Duration::from_secs(5);
+
+    if let Err(_) = tokio::time::timeout(timeout, queue_handle).await {
+        eprintln!("queue_handle Timeout — wird abgebrochen");
+    }
+
+    // stdout-Writer abbrechen (alle Responses sind durch oder Queue ist beendet)
+    stdout_abort.abort();
 
     Ok(())
 }

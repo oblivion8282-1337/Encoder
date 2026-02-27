@@ -33,6 +33,12 @@ pub enum FfmpegEvent {
     },
 }
 
+/// Normalisiert eine Resolution-Angabe fuer FFmpeg.
+/// "1920x1080" -> "1920:1080" (FFmpeg erwartet ':' als Trennzeichen).
+fn normalize_resolution(res: &str) -> String {
+    res.replace('x', ":")
+}
+
 /// Baut die FFmpeg-Argumente fuer den gegebenen Modus zusammen.
 ///
 /// Argument-Reihenfolge ist kritisch:
@@ -108,7 +114,8 @@ pub fn build_ffmpeg_args(
                     // VAAPI braucht format=nv12,hwupload; Skalierung via scale_vaapi
                     args.push("-vf".to_string());
                     if let Some(ref resolution) = options.proxy_resolution {
-                        args.push(format!("format=nv12,hwupload,scale_vaapi={resolution}"));
+                        let res = normalize_resolution(resolution);
+                        args.push(format!("format=nv12,hwupload,scale_vaapi={res}"));
                     } else {
                         args.push("format=nv12,hwupload".to_string());
                     }
@@ -125,8 +132,9 @@ pub fn build_ffmpeg_args(
 
                     // Skalierung falls gewuenscht (normaler scale-Filter)
                     if let Some(ref resolution) = options.proxy_resolution {
+                        let res = normalize_resolution(resolution);
                         args.push("-vf".to_string());
-                        args.push(format!("scale={resolution}"));
+                        args.push(format!("scale={res}"));
                     }
                 }
                 _ => {
@@ -142,8 +150,9 @@ pub fn build_ffmpeg_args(
 
                     // Skalierung falls gewuenscht
                     if let Some(ref resolution) = options.proxy_resolution {
+                        let res = normalize_resolution(resolution);
                         args.push("-vf".to_string());
-                        args.push(format!("scale={resolution}"));
+                        args.push(format!("scale={res}"));
                     }
                 }
             }

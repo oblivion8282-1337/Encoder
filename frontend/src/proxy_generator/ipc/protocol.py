@@ -122,6 +122,15 @@ class JobStatusEntry:
 
 
 @dataclass
+class JobCancelledResponse:
+    id: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> JobCancelledResponse:
+        return cls(id=data["id"])
+
+
+@dataclass
 class StatusReportResponse:
     jobs: list[JobStatusEntry]
 
@@ -148,6 +157,7 @@ _RESPONSE_MAP = {
     "job_progress": JobProgressResponse,
     "job_done": JobDoneResponse,
     "job_error": JobErrorResponse,
+    "job_cancelled": JobCancelledResponse,
     "status_report": StatusReportResponse,
 }
 
