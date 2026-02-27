@@ -47,6 +47,11 @@ _STRINGS: dict[str, dict[str, str]] = {
     "grp.hw":       {"de": "Hardware-Encoding",   "en": "Hardware Encoding"},
     "grp.parallel": {"de": "Parallele Jobs",      "en": "Parallel Jobs"},
     "grp.lang":     {"de": "Sprache",             "en": "Language"},
+    "grp.naming":   {"de": "Ausgabe-Benennung",  "en": "Output Naming"},
+    "lbl.suffix":       {"de": "Suffix:",     "en": "Suffix:"},
+    "lbl.subfolder":    {"de": "Unterordner:", "en": "Subfolder:"},
+    "placeholder.suffix":    {"de": "leer = kein Suffix",      "en": "empty = no suffix"},
+    "placeholder.subfolder": {"de": "z.B. proxy (leer = keiner)", "en": "e.g. proxy (empty = none)"},
     # ── Widgets ────────────────────────────────────────────────────────────
     "btn.browse":         {"de": "Wählen",                   "en": "Browse"},
     "placeholder.output": {"de": "Ausgabe-Ordner wählen...", "en": "Choose output folder..."},

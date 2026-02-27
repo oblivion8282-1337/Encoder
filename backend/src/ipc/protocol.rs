@@ -51,6 +51,14 @@ pub struct JobOptions {
 
     #[serde(default = "default_hw_accel")]
     pub hw_accel: String,
+
+    /// Suffix vor der Dateiendung, z.B. "_proxy". Leer = kein Suffix.
+    #[serde(default = "default_output_suffix")]
+    pub output_suffix: String,
+
+    /// Optionaler Unterordner im Ausgabeverzeichnis, z.B. "proxy". Leer = keiner.
+    #[serde(default)]
+    pub output_subfolder: String,
 }
 
 impl Default for JobOptions {
@@ -60,6 +68,8 @@ impl Default for JobOptions {
             proxy_resolution: None,
             proxy_codec: default_proxy_codec(),
             hw_accel: default_hw_accel(),
+            output_suffix: default_output_suffix(),
+            output_subfolder: String::new(),
         }
     }
 }
@@ -74,6 +84,10 @@ fn default_proxy_codec() -> String {
 
 fn default_hw_accel() -> String {
     "none".to_string()
+}
+
+fn default_output_suffix() -> String {
+    "_proxy".to_string()
 }
 
 // ---------------------------------------------------------------------------

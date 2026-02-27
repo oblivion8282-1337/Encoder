@@ -102,6 +102,8 @@ class IpcClient:
             "audio_codec": job.options.audio_codec,
             "proxy_codec": job.options.proxy_codec,
             "hw_accel": job.options.hw_accel,
+            "output_suffix": job.options.output_suffix,
+            "output_subfolder": job.options.output_subfolder,
         }
         if job.options.proxy_resolution is not None:
             options["proxy_resolution"] = job.options.proxy_resolution

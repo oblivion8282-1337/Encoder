@@ -58,7 +58,7 @@ impl Job {
         self.cancel_token = parent.child_token();
     }
 
-    /// Generiert den Output-Pfad basierend auf Modus.
+    /// Generiert den Output-Pfad basierend auf Modus und Benennungsoptionen.
     pub fn output_path(&self) -> PathBuf {
         let stem = self
             .input_path
@@ -66,16 +66,20 @@ impl Job {
             .unwrap_or_default()
             .to_string_lossy();
 
-        let suffix = match self.mode {
-            JobMode::Proxy  => "_proxy",
-            JobMode::ReWrap => "_rewrap",
-        };
+        let suffix = &self.options.output_suffix;
+
         let ext = match self.mode {
             JobMode::ReWrap => "mov",
             JobMode::Proxy  => if self.options.proxy_codec == "av1" { "mp4" } else { "mov" },
         };
 
-        self.output_dir.join(format!("{stem}{suffix}.{ext}"))
+        let output_dir = if self.options.output_subfolder.is_empty() {
+            self.output_dir.clone()
+        } else {
+            self.output_dir.join(&self.options.output_subfolder)
+        };
+
+        output_dir.join(format!("{stem}{suffix}.{ext}"))
     }
 
     pub fn to_status(&self) -> JobStatus {
@@ -166,8 +170,13 @@ pub async fn run_queue(
                 };
                 job.input_path = input_path;
 
-                // Output-Verzeichnis anlegen falls noetig
-                if let Err(e) = tokio::fs::create_dir_all(&job.output_dir).await {
+                // Output-Verzeichnis anlegen (inkl. optionalem Unterordner)
+                let output_base = if job.options.output_subfolder.is_empty() {
+                    job.output_dir.clone()
+                } else {
+                    job.output_dir.join(&job.options.output_subfolder)
+                };
+                if let Err(e) = tokio::fs::create_dir_all(&output_base).await {
                     let _ = response_tx
                         .send(Response::JobError {
                             id: job_id,

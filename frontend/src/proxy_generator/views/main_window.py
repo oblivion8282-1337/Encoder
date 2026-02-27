@@ -195,6 +195,19 @@ class MainWindow(QMainWindow):
         self._grp_proxy.setVisible(False)
         self._mode_group.idToggled.connect(self._on_mode_changed)
 
+        # -- Output naming ------------------------------------------------------
+        self._grp_naming = QGroupBox("")
+        nl = QVBoxLayout(self._grp_naming)
+        self._lbl_suffix = QLabel("")
+        nl.addWidget(self._lbl_suffix)
+        self._edit_suffix = QLineEdit("_proxy")
+        nl.addWidget(self._edit_suffix)
+        self._lbl_subfolder = QLabel("")
+        nl.addWidget(self._lbl_subfolder)
+        self._edit_subfolder = QLineEdit()
+        nl.addWidget(self._edit_subfolder)
+        layout.addWidget(self._grp_naming)
+
         # -- Hardware encoding --------------------------------------------------
         self._grp_hw = QGroupBox("")
         hl = QVBoxLayout(self._grp_hw)
@@ -265,6 +278,11 @@ class MainWindow(QMainWindow):
         self._grp_proxy.setTitle(tr("grp.proxy"))
         self._lbl_resolution.setText(tr("lbl.resolution"))
         self._lbl_codec.setText(tr("lbl.codec"))
+        self._grp_naming.setTitle(tr("grp.naming"))
+        self._lbl_suffix.setText(tr("lbl.suffix"))
+        self._edit_suffix.setPlaceholderText(tr("placeholder.suffix"))
+        self._lbl_subfolder.setText(tr("lbl.subfolder"))
+        self._edit_subfolder.setPlaceholderText(tr("placeholder.subfolder"))
         self._grp_hw.setTitle(tr("grp.hw"))
         self._grp_par.setTitle(tr("grp.parallel"))
         self._grp_lang.setTitle(tr("grp.lang"))
@@ -312,48 +330,40 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, tr("dlg.no_videos_title"), tr("dlg.no_videos_msg"))
 
-    def _on_start_all(self) -> None:
-        if self._vm is None:
-            return
-        if not self._vm.jobs:
-            QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
-            return
-
-        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
-
+    def _gather_options(self) -> JobOptions:
+        """Liest alle aktuellen Einstellungen aus der UI und gibt JobOptions zurück."""
         resolution_map = {
             "Original": None,
             "1/2": "iw/2:-2",
             "1/4": "iw/4:-2",
             "1/8": "iw/8:-2",
         }
-        proxy_resolution = resolution_map.get(self._combo_resolution.currentText())
-
         codec_map = {
-            "H.264": "h264",
-            "H.265": "h265",
-            "AV1": "av1",
-            "ProRes 422 Proxy": "prores_proxy",
-            "ProRes 422 LT": "prores_lt",
-            "ProRes 422": "prores_422",
-            "ProRes 422 HQ": "prores_hq",
+            "H.264": "h264", "H.265": "h265", "AV1": "av1",
+            "ProRes 422 Proxy": "prores_proxy", "ProRes 422 LT": "prores_lt",
+            "ProRes 422": "prores_422", "ProRes 422 HQ": "prores_hq",
         }
-        proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
-
         hw_map = {
             "Keins / None": "none",
             "NVENC (Nvidia)": "nvenc",
             "VAAPI (AMD/Intel)": "vaapi",
         }
-        hw_accel = hw_map.get(self._combo_hw.currentText(), "none")
-
-        options = JobOptions(
-            proxy_resolution=proxy_resolution,
-            proxy_codec=proxy_codec,
-            hw_accel=hw_accel,
+        return JobOptions(
+            proxy_resolution=resolution_map.get(self._combo_resolution.currentText()),
+            proxy_codec=codec_map.get(self._combo_codec.currentText(), "h264"),
+            hw_accel=hw_map.get(self._combo_hw.currentText(), "none"),
+            output_suffix=self._edit_suffix.text(),
+            output_subfolder=self._edit_subfolder.text().strip(),
         )
 
-        self._vm.start_all(mode, options)
+    def _on_start_all(self) -> None:
+        if self._vm is None:
+            return
+        if not self._vm.jobs:
+            QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
+            return
+        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+        self._vm.start_all(mode, self._gather_options())
         self._statusbar.showMessage(tr("statusbar.started"), 3000)
 
     def _on_clear_done(self) -> None:
@@ -425,38 +435,7 @@ class MainWindow(QMainWindow):
             return
 
         mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
-
-        resolution_map = {
-            "Original": None,
-            "1/2": "iw/2:-2",
-            "1/4": "iw/4:-2",
-            "1/8": "iw/8:-2",
-        }
-        proxy_resolution = resolution_map.get(self._combo_resolution.currentText())
-
-        codec_map = {
-            "H.264": "h264",
-            "H.265": "h265",
-            "AV1": "av1",
-            "ProRes 422 Proxy": "prores_proxy",
-            "ProRes 422 LT": "prores_lt",
-            "ProRes 422": "prores_422",
-            "ProRes 422 HQ": "prores_hq",
-        }
-        proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
-
-        hw_map = {
-            "Keins / None": "none",
-            "NVENC (Nvidia)": "nvenc",
-            "VAAPI (AMD/Intel)": "vaapi",
-        }
-        hw_accel = hw_map.get(self._combo_hw.currentText(), "none")
-
-        options = JobOptions(
-            proxy_resolution=proxy_resolution,
-            proxy_codec=proxy_codec,
-            hw_accel=hw_accel,
-        )
+        options = self._gather_options()
 
         count_before = len(self._vm.jobs)
         self._vm.add_files(paths, output_dir, mode, options)
@@ -563,6 +542,8 @@ class MainWindow(QMainWindow):
         except (ValueError, TypeError):
             parallel = 1
         self._spin_parallel.setValue(parallel)
+        self._edit_suffix.setText(self._settings.value("output_suffix", "_proxy"))
+        self._edit_subfolder.setText(self._settings.value("output_subfolder", ""))
         # Language (must be loaded before retranslate_ui is called)
         lang = self._settings.value("language", "de")
         set_language(lang)
@@ -581,6 +562,8 @@ class MainWindow(QMainWindow):
                                 self._combo_codec.currentText())
         self._settings.setValue("hw_accel", self._combo_hw.currentText())
         self._settings.setValue("parallel_jobs", self._spin_parallel.value())
+        self._settings.setValue("output_suffix", self._edit_suffix.text())
+        self._settings.setValue("output_subfolder", self._edit_subfolder.text().strip())
         self._settings.setValue("language", get_language())
 
     # -- drag & drop ------------------------------------------------------------
