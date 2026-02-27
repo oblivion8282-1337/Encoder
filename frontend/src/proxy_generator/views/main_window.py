@@ -179,9 +179,7 @@ class MainWindow(QMainWindow):
 
         pl.addWidget(QLabel("Aufloesung:"))
         self._combo_resolution = QComboBox()
-        self._combo_resolution.addItems([
-            "Beibehalten", "1920:1080", "1280:720", "960:540",
-        ])
+        self._combo_resolution.addItems(["Original", "1/2", "1/4", "1/8"])
         pl.addWidget(self._combo_resolution)
 
         pl.addWidget(QLabel("Codec:"))
@@ -334,10 +332,13 @@ class MainWindow(QMainWindow):
 
         mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
 
-        resolution_text = self._combo_resolution.currentText()
-        proxy_resolution: Optional[str] = None
-        if resolution_text != "Beibehalten":
-            proxy_resolution = resolution_text
+        resolution_map = {
+            "Original": None,
+            "1/2": "iw/2:-2",
+            "1/4": "iw/4:-2",
+            "1/8": "iw/8:-2",
+        }
+        proxy_resolution = resolution_map.get(self._combo_resolution.currentText())
 
         codec_map = {
             "H.264": "h264",
