@@ -2,12 +2,16 @@
 # Erzeugt die QApplication und zeigt das Hauptfenster an.
 
 import logging
+import os
 import sys
 
 from PyQt6.QtCore import QSettings
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QStyleFactory
 
 from proxy_generator.app import create_app
+
+APP_ID = "de.michaelproxy.ProxyGenerator"
 
 
 def main() -> None:
@@ -19,6 +23,21 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Proxy Generator")
     app.setOrganizationName("proxy-generator")
+
+    # Wayland: Desktop-Dateiname setzen damit der Compositor Icon + App-ID kennt
+    app.setDesktopFileName(APP_ID)
+
+    # Fenster-Icon setzen (AppImage: aus $APPDIR, sonst XDG-Theme-Fallback)
+    icon = QIcon()
+    appdir = os.environ.get("APPDIR", "")
+    if appdir:
+        png = os.path.join(appdir, f"{APP_ID}.png")
+        if os.path.isfile(png):
+            icon = QIcon(png)
+    if icon.isNull():
+        icon = QIcon.fromTheme(APP_ID)
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     # Style BEVOR irgendwelche Widgets gebaut werden setzen
     settings = QSettings("proxy-generator", "ProxyGenerator")
