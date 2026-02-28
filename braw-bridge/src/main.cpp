@@ -392,6 +392,7 @@ struct Options
     std::string input_file;
     std::string extract_audio_path;
     BlackmagicRawResolutionScale resolution_scale = blackmagicRawResolutionScaleFull;
+    bool probe_only = false;
 };
 
 static bool parse_args(int argc, char* argv[], Options& opts)
@@ -420,6 +421,10 @@ static bool parse_args(int argc, char* argv[], Options& opts)
         else if (strcmp(argv[i], "--extract-audio") == 0 && i + 1 < argc)
         {
             opts.extract_audio_path = argv[++i];
+        }
+        else if (strcmp(argv[i], "--probe-only") == 0)
+        {
+            opts.probe_only = true;
         }
         else
         {
@@ -591,6 +596,14 @@ int main(int argc, char* argv[])
 
     json_metadata(timecode.c_str(), fps_num, fps_den, width, height, frame_count);
     fflush(stderr);
+
+    if (opts.probe_only)
+    {
+        clip->Release();
+        codec->Release();
+        factory->Release();
+        return 0;
+    }
 
     // --- Process frames ---
 
