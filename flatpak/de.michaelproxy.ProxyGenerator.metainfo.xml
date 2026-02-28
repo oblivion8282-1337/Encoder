@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.michaelproxy.ProxyGenerator</id>
+  <name>Proxy Generator</name>
+  <summary>Video proxy and re-wrapper for DaVinci Resolve</summary>
+
+  <description>
+    <p>
+      Proxy Generator creates optimized proxy media for DaVinci Resolve workflows on Linux.
+      Supports standard video formats as well as Blackmagic RAW (BRAW) and RED RAW (R3D).
+    </p>
+    <ul>
+      <li>Proxy generation with configurable resolution and codec</li>
+      <li>Audio re-wrapping (AAC to PCM) with 1:1 channel preservation</li>
+      <li>Timecode preservation</li>
+      <li>Resolve-compatible folder structure for proxies</li>
+      <li>Blackmagic RAW (BRAW) support via BRAW SDK</li>
+      <li>RED RAW (R3D) support via R3D SDK v9.1.2</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">de.michaelproxy.ProxyGenerator.desktop</launchable>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+
+  <releases>
+    <release version="0.1.0" date="2026-02-28">
+      <description>
+        <p>Erste Version mit BRAW- und R3D-Support.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+</component>

@@ -6,13 +6,13 @@ use anyhow::{Context, Result};
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::ffmpeg::runner::{is_prores, push_proxy_codec_args, FfmpegEvent};
+use crate::ffmpeg::runner::{is_prores, nvenc_available, vaapi_available, push_proxy_codec_args, FfmpegEvent};
 use crate::ipc::protocol::JobOptions;
 
 /// Metadaten einer BRAW-Datei, geliefert von braw-bridge.
@@ -157,13 +157,13 @@ fn build_braw_ffmpeg_args(
     // aber NVENC/VAAPI koennen den Encode-Schritt auf der GPU ausfuehren.
     if !is_prores(&options.proxy_codec) {
         match options.hw_accel.as_str() {
-            "nvenc" => {
+            "nvenc" if nvenc_available() => {
                 args.push("-init_hw_device".to_string());
                 args.push("cuda=cuda:0".to_string());
                 args.push("-filter_hw_device".to_string());
                 args.push("cuda".to_string());
             }
-            "vaapi" => {
+            "vaapi" if vaapi_available() => {
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
@@ -302,9 +302,29 @@ pub async fn run_braw_job(
         .args(&ffmpeg_args)
         .stdin(bridge_stdout_raw)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .context("FFmpeg konnte nicht gestartet werden")?;
+
+    // FFmpeg-stderr asynchron in Puffer sammeln (wird bei Fehler angezeigt)
+    let ffmpeg_stderr_buf = Arc::new(Mutex::new(String::new()));
+    {
+        let ffmpeg_stderr = ffmpeg_child
+            .stderr
+            .take()
+            .context("Konnte stderr von FFmpeg nicht lesen")?;
+        let buf = Arc::clone(&ffmpeg_stderr_buf);
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(ffmpeg_stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut b = buf.lock().unwrap();
+                if b.len() < 4096 {
+                    b.push_str(&line);
+                    b.push('\n');
+                }
+            }
+        });
+    }
 
     let total_frames = meta.frame_count;
 
@@ -359,24 +379,34 @@ pub async fn run_braw_job(
                         pid_slot.store(0, Ordering::Release);
                         cleanup_audio(&audio_wav);
 
-                        if !bridge_status.success() {
+                        // FFmpeg zuerst prüfen: FFmpeg-Fehler verursachen SIGPIPE in braw-bridge
+                        let ffmpeg_stderr = ffmpeg_stderr_buf.lock().unwrap().clone();
+
+                        if !ffmpeg_status.success() {
+                            let exit_info = match ffmpeg_status.code() {
+                                Some(c) => format!("Exit-Code: {c}"),
+                                None => "durch Signal beendet".to_string(),
+                            };
+                            let stderr_hint = if ffmpeg_stderr.trim().is_empty() {
+                                String::new()
+                            } else {
+                                format!("\nFFmpeg stderr:\n{}", ffmpeg_stderr.trim())
+                            };
                             let _ = tx
                                 .send(FfmpegEvent::Error {
                                     id: job_id.clone(),
-                                    message: format!(
-                                        "braw-bridge beendet mit Exit-Code: {}",
-                                        bridge_status.code().unwrap_or(-1)
-                                    ),
+                                    message: format!("FFmpeg {exit_info}{stderr_hint}"),
                                 })
                                 .await;
-                        } else if !ffmpeg_status.success() {
+                        } else if !bridge_status.success() {
+                            let exit_info = match bridge_status.code() {
+                                Some(c) => format!("Exit-Code: {c}"),
+                                None => "durch Signal beendet (SIGPIPE?)".to_string(),
+                            };
                             let _ = tx
                                 .send(FfmpegEvent::Error {
                                     id: job_id.clone(),
-                                    message: format!(
-                                        "FFmpeg beendet mit Exit-Code: {}",
-                                        ffmpeg_status.code().unwrap_or(-1)
-                                    ),
+                                    message: format!("braw-bridge {exit_info}"),
                                 })
                                 .await;
                         } else {

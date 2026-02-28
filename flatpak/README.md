@@ -2,51 +2,105 @@
 
 ## Voraussetzungen
 
-Folgende Tools muessen installiert sein:
-
-- **flatpak-builder** -- Baut Flatpak-Apps aus Manifesten
-- **flatpak-cargo-generator** -- Generiert Cargo-Quellen fuer Offline-Builds ([flatpak-builder-tools](https://github.com/niclasl/flatpak-builder-tools))
-- **flatpak-pip-generator** -- Generiert Python-Quellen fuer Offline-Builds ([flatpak-builder-tools](https://github.com/niclasl/flatpak-builder-tools))
-
-Runtimes und SDKs installieren:
+### Tools
 
 ```sh
-flatpak install flathub org.kde.Platform//6.9 org.kde.Sdk//6.9
-flatpak install flathub com.riverbankcomputing.PyQt.BaseApp//6.9
-flatpak install flathub org.freedesktop.Sdk.Extension.rust-stable//24.08
+# flatpak-builder (Arch/CachyOS)
+sudo pacman -S flatpak-builder
+
+# flatpak-builder-tools (flatpak-cargo-generator + flatpak-pip-generator)
+# Option A: aus dem AUR
+paru -S flatpak-builder-tools
+# Option B: direkt aus dem Repo
+pip install flatpak-builder-tools
 ```
 
-## Quellen generieren
-
-### Cargo-Quellen (Rust Backend)
+### Runtimes und SDKs installieren
 
 ```sh
-python3 flatpak-cargo-generator.py ../backend/Cargo.lock -o flatpak/cargo-sources.json
+flatpak install flathub \
+  org.kde.Platform//6.9 \
+  org.kde.Sdk//6.9 \
+  com.riverbankcomputing.PyQt.BaseApp//6.9 \
+  org.freedesktop.Sdk.Extension.rust-stable//24.08 \
+  org.freedesktop.Platform.ffmpeg-full//24.08
 ```
 
-### Python-Quellen (pip-Abhaengigkeiten)
+---
+
+## Schritt 1: Offline-Quellen generieren
+
+Diese Dateien müssen einmalig erstellt werden und nach jeder Änderung an
+`Cargo.lock` oder den Python-Abhängigkeiten erneuert werden.
 
 ```sh
-python3 flatpak-pip-generator.py hatchling -o flatpak/python3-requirements
+# Aus dem Projekt-Stammverzeichnis:
+just flatpak-sources
+
+# Oder manuell:
+flatpak-cargo-generator backend/Cargo.lock -o flatpak/cargo-sources.json
+flatpak-pip-generator hatchling -o flatpak/python3-requirements.json
 ```
 
-Falls weitere Python-Abhaengigkeiten in `frontend/pyproject.toml` hinzukommen,
-diese ebenfalls an `flatpak-pip-generator.py` uebergeben.
+Danach liegen in `flatpak/` bereit:
+- `cargo-sources.json` – Rust-Crates für Offline-Build
+- `python3-requirements.json` – hatchling und Abhängigkeiten
 
-## Bauen und Installieren
+---
 
-Aus dem Projekt-Stammverzeichnis:
+## Schritt 2: Bauen und Installieren
 
 ```sh
-# Bauen
-flatpak-builder --force-clean build-dir flatpak/de.michaelproxy.ProxyGenerator.yml
+# Bauen + lokal installieren (empfohlen für Entwicklung)
+just flatpak-build
 
-# Ins lokale Repo exportieren und installieren
-flatpak-builder --user --install --force-clean build-dir flatpak/de.michaelproxy.ProxyGenerator.yml
+# Nur bauen (kein Install):
+just flatpak-build-only
+
+# Manuell:
+flatpak-builder --user --install --force-clean \
+  flatpak/build-dir \
+  flatpak/de.michaelproxy.ProxyGenerator.yml
 ```
 
-## Starten
+---
+
+## Schritt 3: Starten
 
 ```sh
 flatpak run de.michaelproxy.ProxyGenerator
+# oder:
+just flatpak-run
 ```
+
+---
+
+## Aufräumen
+
+```sh
+just flatpak-clean
+# entfernt: flatpak/build-dir  flatpak/.flatpak-builder
+```
+
+---
+
+## Modulübersicht
+
+| # | Modul | Beschreibung |
+|---|-------|-------------|
+| 1 | `python3-requirements.json` | hatchling (Build-Backend für pip) |
+| 2 | `backend` | Rust-Binary (`proxy-generator-backend`) |
+| 3 | `braw-bridge` | C++ Binary + BRAW SDK `.so`-Dateien |
+| 4 | `r3d-bridge` | C++ Binary (R3D SDK statisch gelinkt) |
+| 5 | `frontend` | Python-Package (PyQt6 kommt aus BaseApp) |
+| 6 | `desktop-integration` | Desktop-Eintrag, Icon, AppStream-Metainfo |
+
+## Hinweise
+
+**BRAW SDK-Bibliotheken** werden nach `/app/sdk/Libraries/Linux/` installiert,
+damit der im Binary eingebettete RPATH (`$ORIGIN/../sdk/Libraries/Linux`) greift.
+
+**R3D SDK** ist statisch gelinkt (`libR3DSDKPIC.a`) – keine Laufzeit-Abhängigkeiten.
+
+**FFmpeg** wird über die Extension `org.freedesktop.Platform.ffmpeg-full//24.08`
+bereitgestellt – nicht im Bundle enthalten.

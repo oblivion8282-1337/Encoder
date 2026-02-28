@@ -31,7 +31,7 @@ cleanup-commands:
   - /app/cleanup-BaseApp.sh
 
 modules:
-  # 1. Python-Abhängigkeiten (generiert via flatpak-pip-generator)
+  # 1. Python Build-Abhängigkeiten (hatchling; generiert via flatpak-pip-generator)
   - python3-requirements.json
 
   # 2. Rust Backend Binary
@@ -48,29 +48,64 @@ modules:
       - cargo build --release --offline
       - install -Dm755 target/release/proxy-generator-backend /app/bin/proxy-generator-backend
 
-  # 3. Python Frontend
+  # 3. BRAW Bridge (Blackmagic RAW)
+  #    Die SDK-.so-Dateien werden nach /app/sdk/Libraries/Linux/ installiert,
+  #    damit der RPATH des Binaries ($ORIGIN/../sdk/Libraries/Linux) greift.
+  - name: braw-bridge
+    buildsystem: simple
+    build-commands:
+      - rm -rf build
+      - cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/app
+      - cmake --build build -j$(nproc)
+      - cmake --install build
+      - install -Dm755 sdk/Libraries/Linux/libBlackmagicRawAPI.so /app/sdk/Libraries/Linux/libBlackmagicRawAPI.so
+      - install -Dm755 sdk/Libraries/Linux/libc++.so.1 /app/sdk/Libraries/Linux/libc++.so.1
+      - install -Dm755 sdk/Libraries/Linux/libc++abi.so.1 /app/sdk/Libraries/Linux/libc++abi.so.1
+      - install -Dm755 sdk/Libraries/Linux/libDecoderCUDA.so /app/sdk/Libraries/Linux/libDecoderCUDA.so
+      - install -Dm755 sdk/Libraries/Linux/libDecoderOpenCL.so /app/sdk/Libraries/Linux/libDecoderOpenCL.so
+      - install -Dm755 sdk/Libraries/Linux/libInstructionSetServicesAVX2.so /app/sdk/Libraries/Linux/libInstructionSetServicesAVX2.so
+      - install -Dm755 sdk/Libraries/Linux/libInstructionSetServicesAVX.so /app/sdk/Libraries/Linux/libInstructionSetServicesAVX.so
+    sources:
+      - type: dir
+        path: ../braw-bridge
+
+  # 4. R3D Bridge (RED RAW)
+  #    Statisch gegen libR3DSDKPIC.a gelinkt – keine Laufzeit-.so nötig.
+  - name: r3d-bridge
+    buildsystem: simple
+    build-commands:
+      - rm -rf build
+      - cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/app
+      - cmake --build build -j$(nproc)
+      - cmake --install build
+    sources:
+      - type: dir
+        path: ../r3d-bridge
+
+  # 5. Python Frontend
+  #    Zwei-Stufen-Install: erst Wheel bauen (hatchling via PYTHONPATH),
+  #    dann Wheel installieren (pip braucht hatchling beim Wheel-Install nicht).
   - name: frontend
     buildsystem: simple
     sources:
       - type: dir
         path: ../frontend
     build-commands:
-      - pip3 install --no-deps --prefix=/app .
+      - PYTHONPATH=/app/lib/python3.12/site-packages python3 -m hatchling build -t wheel
+      - pip3 install --no-deps --prefix=/app dist/proxy_generator-*.whl
       - mkdir -p /app/lib/ffmpeg
 
-  # 4. Desktop Entry + Icon
+  # 6. Desktop Entry + Icon + AppStream Metainfo
   - name: desktop-integration
     buildsystem: simple
     sources:
-      - type: inline
-        dest-filename: de.michaelproxy.ProxyGenerator.desktop
-        contents: |
-          [Desktop Entry]
-          Name=Proxy Generator
-          Comment=Video proxy and re-wrapper for DaVinci Resolve
-          Exec=proxy-generator
-          Icon=de.michaelproxy.ProxyGenerator
-          Type=Application
-          Categories=AudioVideo;Video;
+      - type: file
+        path: de.michaelproxy.ProxyGenerator.desktop
+      - type: file
+        path: de.michaelproxy.ProxyGenerator.svg
+      - type: file
+        path: de.michaelproxy.ProxyGenerator.metainfo.xml
     build-commands:
       - install -Dm644 de.michaelproxy.ProxyGenerator.desktop /app/share/applications/de.michaelproxy.ProxyGenerator.desktop
+      - install -Dm644 de.michaelproxy.ProxyGenerator.svg /app/share/icons/hicolor/scalable/apps/de.michaelproxy.ProxyGenerator.svg
+      - install -Dm644 de.michaelproxy.ProxyGenerator.metainfo.xml /app/share/metainfo/de.michaelproxy.ProxyGenerator.metainfo.xml

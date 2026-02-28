@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -66,11 +66,11 @@ pub fn build_ffmpeg_args(
     // HW-Accel Flags VOR -i (nur Proxy, nicht ProRes – ProRes ist immer CPU)
     if matches!(mode, JobMode::Proxy) && !is_prores(&options.proxy_codec) {
         match options.hw_accel.as_str() {
-            "vaapi" => {
+            "vaapi" if vaapi_available() => {
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
-            "nvenc" => {
+            "nvenc" if nvenc_available() => {
                 // CUDA-Device fuer Filtergraph (benoetigt von hwupload + scale_cuda).
                 args.push("-init_hw_device".to_string());
                 args.push("cuda=cuda:0".to_string());
@@ -157,6 +157,29 @@ pub fn build_ffmpeg_args(
 // Codec-Hilfsfunktionen
 // ---------------------------------------------------------------------------
 
+static NVENC_AVAILABLE: OnceLock<bool> = OnceLock::new();
+static VAAPI_AVAILABLE: OnceLock<bool> = OnceLock::new();
+
+/// Prüft ob ein bestimmter FFmpeg-Encoder in diesem Build verfügbar ist.
+/// Wird einmalig per Prozess ausgeführt und gecacht.
+fn probe_encoder(name: &str) -> bool {
+    let Ok(out) = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&out.stdout).contains(name)
+}
+
+pub fn nvenc_available() -> bool {
+    *NVENC_AVAILABLE.get_or_init(|| probe_encoder("h264_nvenc"))
+}
+
+pub fn vaapi_available() -> bool {
+    *VAAPI_AVAILABLE.get_or_init(|| probe_encoder("h264_vaapi"))
+}
+
 pub fn is_prores(codec: &str) -> bool {
     matches!(codec, "prores_proxy" | "prores_lt" | "prores_422" | "prores_hq")
 }
@@ -172,21 +195,21 @@ pub fn push_proxy_codec_args(
     match proxy_codec {
         // ── H.264 ──────────────────────────────────────────────────────────
         "h264" => match hw_accel {
-            "vaapi" => push_vaapi(args, "h264_vaapi", resolution),
-            "nvenc" => push_nvenc(args, "h264_nvenc", "23", resolution, nvenc_full_gpu),
+            "vaapi" if vaapi_available() => push_vaapi(args, "h264_vaapi", resolution),
+            "nvenc" if nvenc_available() => push_nvenc(args, "h264_nvenc", "23", resolution, nvenc_full_gpu),
             _       => push_sw_x264(args, resolution),
         },
         // ── H.265 / HEVC ───────────────────────────────────────────────────
         "h265" => match hw_accel {
-            "vaapi" => push_vaapi(args, "hevc_vaapi", resolution),
-            "nvenc" => push_nvenc(args, "hevc_nvenc", "23", resolution, nvenc_full_gpu),
+            "vaapi" if vaapi_available() => push_vaapi(args, "hevc_vaapi", resolution),
+            "nvenc" if nvenc_available() => push_nvenc(args, "hevc_nvenc", "23", resolution, nvenc_full_gpu),
             _       => push_sw_x265(args, resolution),
         },
         // ── AV1 ────────────────────────────────────────────────────────────
         "av1" => match hw_accel {
-            "vaapi" => push_vaapi(args, "av1_vaapi", resolution),
+            "vaapi" if vaapi_available() => push_vaapi(args, "av1_vaapi", resolution),
             // AV1 NVENC: braucht yuv420p (keine CUDA-Frames) + SW-scale statt scale_cuda
-            "nvenc" => push_nvenc_av1(args, resolution),
+            "nvenc" if nvenc_available() => push_nvenc_av1(args, resolution),
             _       => push_sw_av1(args, resolution),
         },
         // ── ProRes ─────────────────────────────────────────────────────────

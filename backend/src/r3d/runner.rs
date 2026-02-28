@@ -12,7 +12,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::ffmpeg::runner::{is_prores, push_proxy_codec_args, FfmpegEvent};
+use crate::ffmpeg::runner::{is_prores, nvenc_available, vaapi_available, push_proxy_codec_args, FfmpegEvent};
 use crate::ipc::protocol::JobOptions;
 
 /// Metadaten einer R3D-Datei, geliefert von r3d-bridge.
@@ -155,13 +155,13 @@ fn build_r3d_ffmpeg_args(
     // HW-Accel Init-Flags VOR -i (nur fuer GPU-Encoder, nicht fuer ProRes)
     if !is_prores(&options.proxy_codec) {
         match options.hw_accel.as_str() {
-            "nvenc" => {
+            "nvenc" if nvenc_available() => {
                 args.push("-init_hw_device".to_string());
                 args.push("cuda=cuda:0".to_string());
                 args.push("-filter_hw_device".to_string());
                 args.push("cuda".to_string());
             }
-            "vaapi" => {
+            "vaapi" if vaapi_available() => {
                 args.push("-vaapi_device".to_string());
                 args.push("/dev/dri/renderD128".to_string());
             }
