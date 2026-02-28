@@ -30,9 +30,10 @@ die()  { echo "✗ $*" >&2; exit 1; }
 need() { command -v "$1" &>/dev/null || die "Fehlendes Tool: $1  →  sudo pacman -S $2"; }
 
 # ── Voraussetzungen ──────────────────────────────────────────────────────────
-need cargo     "rust"
-need cmake     "cmake"
+need cargo       "rust"
+need cmake       "cmake"
 need rsvg-convert "librsvg"
+need patchelf    "patchelf"
 
 mkdir -p "$CACHE_DIR"
 
@@ -138,6 +139,61 @@ rsvg-convert -w 256 -h 256 \
     -o "$APPDIR/de.michaelproxy.ProxyGenerator.png"
 
 ln -sf de.michaelproxy.ProxyGenerator.png "$APPDIR/.DirIcon"
+
+# ── Breeze Style-Plugin bundeln (für KDE-Look) ───────────────────────────────
+# breeze6.so + alle KF6-Abhängigkeiten werden in PyQt6/Qt6/lib/ kopiert,
+# wo die Qt6-Libs bereits liegen. So finden alle Libs sich gegenseitig.
+BREEZE_SO="/usr/lib/qt6/plugins/styles/breeze6.so"
+PYQT6_BASE="$APPDIR/usr/lib/python3.12/site-packages/PyQt6"
+PYQT6_LIB="$PYQT6_BASE/Qt6/lib"
+PYQT6_STYLES="$PYQT6_BASE/Qt6/plugins/styles"
+
+bundle_libs() {
+    # Kopiert alle nicht-System/nicht-Qt-Abhängigkeiten einer .so rekursiv nach $1
+    local src="$1" dest="$2"
+    while IFS= read -r dep; do
+        [[ -f "$dep" ]] || continue
+        local name; name="$(basename "$dep")"
+        [[ -f "$dest/$name" ]] && continue
+        case "$name" in
+            libc.so*|libm.so*|libdl.so*|libpthread.so*|librt.so*|\
+            libgcc_s.so*|ld-linux*|linux-vdso*|libstdc++.so*|\
+            libQt6*.so*) continue ;;   # Qt6 ist schon in PyQt6/Qt6/lib/
+        esac
+        cp -L "$dep" "$dest/$name"
+        bundle_libs "$dep" "$dest"
+    done < <(readelf -d "$src" 2>/dev/null \
+        | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); print $NF}' \
+        | while read -r lib; do ldconfig -p 2>/dev/null | awk -v l="$lib" '$1==l{print $NF;exit}'; done)
+}
+
+if [[ -f "$BREEZE_SO" ]]; then
+    # Qt-Version prüfen: breeze6.so muss zur gepakten PyQt6-Qt-Version passen
+    SYS_QT="$(pkg-config --modversion Qt6Core 2>/dev/null | cut -d. -f1-2 || echo '')"
+    PKG_QT="$("$PYTHON" -c \
+        'from PyQt6.QtCore import QT_VERSION_STR; print(".".join(QT_VERSION_STR.split(".")[:2]))' \
+        2>/dev/null || echo '')"
+
+    if [[ -n "$SYS_QT" && -n "$PKG_QT" && "$SYS_QT" == "$PKG_QT" ]]; then
+        log "Bundele Breeze-Theme (Qt $PKG_QT)..."
+        bundle_libs "$BREEZE_SO" "$PYQT6_LIB"
+
+        # KF6-Libs in PyQt6/Qt6/lib/ patcheln: RPATH=$ORIGIN (finden sich + Qt6-Libs)
+        for lib in "$PYQT6_LIB"/libKF*.so* "$PYQT6_LIB"/libKirigami*.so*; do
+            [[ -f "$lib" ]] && patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
+        done
+
+        # breeze6.so in styles/ kopieren + RPATH auf PyQt6/Qt6/lib/ zeigen
+        # Von styles/ nach Qt6/lib/: $ORIGIN/../../lib
+        mkdir -p "$PYQT6_STYLES"
+        cp "$BREEZE_SO" "$PYQT6_STYLES/"
+        patchelf --set-rpath '$ORIGIN/../../lib' "$PYQT6_STYLES/breeze6.so"
+    else
+        log "Warnung: Qt-Version-Mismatch (System: $SYS_QT, PyQt6-pip: $PKG_QT) – Breeze übersprungen"
+    fi
+else
+    log "Breeze-Plugin nicht gefunden (/usr/lib/qt6/plugins/styles/breeze6.so) – übersprungen"
+fi
 
 # ── AppRun kopieren ──────────────────────────────────────────────────────────
 cp "$SCRIPT_DIR/AppRun" "$APPDIR/AppRun"
