@@ -146,7 +146,7 @@ fn build_braw_ffmpeg_args(
     // Tatsaechliche Frame-Dimensionen nach Debayer berechnen.
     // probe_braw_metadata liefert die volle Sensor-Aufloesung; braw-bridge
     // gibt aber bei half/quarter entsprechend kleinere Frames aus.
-    let (frame_width, frame_height) = match options.debayer_quality.as_str() {
+    let (frame_width, frame_height) = match options.debayer_quality.to_lowercase().as_str() {
         "half"    => (meta.width / 2, meta.height / 2),
         "quarter" => (meta.width / 4, meta.height / 4),
         _         => (meta.width, meta.height),
@@ -253,11 +253,12 @@ pub async fn run_braw_job(
     let ffmpeg_args = build_braw_ffmpeg_args(&output_path, options, &meta, audio_wav.as_deref());
 
     // Schritt 2: braw-bridge starten
+    let debayer_arg = options.debayer_quality.to_lowercase();
     let mut bridge_child = Command::new(&bridge)
         .arg("--input")
         .arg(input_path.as_os_str())
         .arg("--debayer")
-        .arg(&options.debayer_quality)
+        .arg(&debayer_arg)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
