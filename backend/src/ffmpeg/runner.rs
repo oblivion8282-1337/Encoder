@@ -152,7 +152,7 @@ pub fn build_ffmpeg_args(
 // Codec-Hilfsfunktionen
 // ---------------------------------------------------------------------------
 
-fn is_prores(codec: &str) -> bool {
+pub fn is_prores(codec: &str) -> bool {
     matches!(codec, "prores_proxy" | "prores_lt" | "prores_422" | "prores_hq")
 }
 

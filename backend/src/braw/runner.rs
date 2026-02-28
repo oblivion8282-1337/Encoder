@@ -12,7 +12,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::ffmpeg::runner::{push_proxy_codec_args, FfmpegEvent};
+use crate::ffmpeg::runner::{is_prores, push_proxy_codec_args, FfmpegEvent};
 use crate::ipc::protocol::JobOptions;
 
 /// Metadaten einer BRAW-Datei, geliefert von braw-bridge.
@@ -152,6 +152,25 @@ fn build_braw_ffmpeg_args(
         _         => (meta.width, meta.height),
     };
 
+    // HW-Accel Init-Flags VOR -i (nur fuer GPU-Encoder, nicht fuer ProRes)
+    // NVDEC ist nicht moeglich (Input ist bereits dekodiertes rgb24),
+    // aber NVENC/VAAPI koennen den Encode-Schritt auf der GPU ausfuehren.
+    if !is_prores(&options.proxy_codec) {
+        match options.hw_accel.as_str() {
+            "nvenc" => {
+                args.push("-init_hw_device".to_string());
+                args.push("cuda=cuda:0".to_string());
+                args.push("-filter_hw_device".to_string());
+                args.push("cuda".to_string());
+            }
+            "vaapi" => {
+                args.push("-vaapi_device".to_string());
+                args.push("/dev/dri/renderD128".to_string());
+            }
+            _ => {}
+        }
+    }
+
     // Input 0: Raw-Video von stdin
     args.push("-f".to_string());
     args.push("rawvideo".to_string());
@@ -186,9 +205,9 @@ fn build_braw_ffmpeg_args(
     push_proxy_codec_args(
         &mut args,
         &options.proxy_codec,
-        "none",
+        &options.hw_accel,
         resolution.as_deref(),
-        false,
+        false, // full_gpu=false: kein NVDEC moeglich, CPU-Decode → GPU-Encode
     );
 
     // Audio-Codec (PCM, nur wenn Audio vorhanden)
