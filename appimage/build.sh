@@ -131,11 +131,11 @@ WHEEL="$(ls "$FRONTEND_DIST"/proxy_generator-*.whl | head -1)"
 
 # ── Desktop-Datei + Icon ─────────────────────────────────────────────────────
 log "Kopiere Desktop-Integration..."
-cp "$ROOT_DIR/flatpak/de.michaelproxy.ProxyGenerator.desktop" "$APPDIR/"
+cp "$SCRIPT_DIR/de.michaelproxy.ProxyGenerator.desktop" "$APPDIR/"
 
 # SVG → PNG (256×256) für AppImage-Icon
 rsvg-convert -w 256 -h 256 \
-    "$ROOT_DIR/flatpak/de.michaelproxy.ProxyGenerator.svg" \
+    "$SCRIPT_DIR/de.michaelproxy.ProxyGenerator.svg" \
     -o "$APPDIR/de.michaelproxy.ProxyGenerator.png"
 
 ln -sf de.michaelproxy.ProxyGenerator.png "$APPDIR/.DirIcon"

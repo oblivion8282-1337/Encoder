@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Proxy Generator
+Comment=Video proxy and re-wrapper for DaVinci Resolve
+Exec=proxy-generator
+Icon=de.michaelproxy.ProxyGenerator
+Type=Application
+Categories=AudioVideo;Video;
