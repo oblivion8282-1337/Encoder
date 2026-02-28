@@ -5,6 +5,7 @@ mod braw;
 mod ffmpeg;
 mod ipc;
 mod jobs;
+mod r3d;
 
 use std::sync::Arc;
 

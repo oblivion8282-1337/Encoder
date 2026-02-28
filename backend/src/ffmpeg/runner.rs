@@ -136,6 +136,11 @@ pub fn build_ffmpeg_args(
             // eigene Arg-Logik in braw::runner::build_braw_ffmpeg_args
             unreachable!("BrawProxy nutzt eigene FFmpeg-Args via braw::runner");
         }
+        JobMode::R3dProxy => {
+            // R3dProxy wird nicht ueber build_ffmpeg_args abgewickelt –
+            // eigene Arg-Logik in r3d::runner::build_r3d_ffmpeg_args
+            unreachable!("R3dProxy nutzt eigene FFmpeg-Args via r3d::runner");
+        }
     }
 
     // Strukturiertes Progress-Reporting auf stderr

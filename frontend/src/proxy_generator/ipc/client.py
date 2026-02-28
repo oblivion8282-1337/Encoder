@@ -109,6 +109,7 @@ class IpcClient:
             "output_subfolder": job.options.output_subfolder,
             "skip_if_exists": job.options.skip_if_exists,
             "debayer_quality": job.options.debayer_quality,
+            "r3d_debayer_quality": job.options.r3d_debayer_quality,
         }
         if job.options.proxy_resolution is not None:
             options["proxy_resolution"] = job.options.proxy_resolution

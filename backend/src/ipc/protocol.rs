@@ -46,6 +46,7 @@ pub enum JobMode {
     ReWrap,
     Proxy,
     BrawProxy,
+    R3dProxy,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -77,6 +78,10 @@ pub struct JobOptions {
     /// Debayer-Qualitaet fuer BRAW: "full" | "half" | "quarter"
     #[serde(default = "default_debayer_quality")]
     pub debayer_quality: String,
+
+    /// Debayer-Qualitaet fuer R3D: "premium" | "half" | "quarter" | "eighth"
+    #[serde(default = "default_r3d_debayer_quality")]
+    pub r3d_debayer_quality: String,
 }
 
 impl Default for JobOptions {
@@ -90,6 +95,7 @@ impl Default for JobOptions {
             output_subfolder: String::new(),
             skip_if_exists: false,
             debayer_quality: default_debayer_quality(),
+            r3d_debayer_quality: default_r3d_debayer_quality(),
         }
     }
 }
@@ -112,6 +118,10 @@ fn default_output_suffix() -> String {
 
 fn default_debayer_quality() -> String {
     "full".to_string()
+}
+
+fn default_r3d_debayer_quality() -> String {
+    "half".to_string()
 }
 
 // ---------------------------------------------------------------------------

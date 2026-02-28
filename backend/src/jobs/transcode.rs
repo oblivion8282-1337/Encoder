@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::braw::runner as braw_runner;
+use crate::r3d::runner as r3d_runner;
 use crate::ffmpeg::runner::{self, build_ffmpeg_args, FfmpegEvent};
 #[allow(unused_imports)]
 use libc;
@@ -74,7 +75,7 @@ impl Job {
 
         let ext = match self.mode {
             JobMode::ReWrap => "mov",
-            JobMode::Proxy | JobMode::BrawProxy => {
+            JobMode::Proxy | JobMode::BrawProxy | JobMode::R3dProxy => {
                 if self.options.proxy_codec == "av1" { "mp4" } else { "mov" }
             }
         };
@@ -231,27 +232,29 @@ pub async fn run_queue(
                 };
                 job.output_dir = output_dir;
 
-                // --- Probing: BRAW vs. normale Dateien ---
+                // --- Probing: BRAW / R3D vs. normale Dateien ---
                 let is_braw = matches!(job.mode, JobMode::BrawProxy);
+                let is_r3d  = matches!(job.mode, JobMode::R3dProxy);
                 let input_path_clone = job.input_path.clone();
 
-                // BRAW: Metadaten via braw-bridge, sonst ffprobe
+                // BRAW/R3D: Metadaten via Bridge, sonst ffprobe
                 let braw_meta: Option<braw_runner::BrawMetadata>;
+                let r3d_meta:  Option<r3d_runner::R3dMetadata>;
                 let total_duration_us: i64;
                 let nvenc_full_gpu: bool;
 
                 if is_braw {
                     match braw_runner::probe_braw_metadata(&input_path_clone).await {
                         Ok(meta) => {
-                            // Dauer berechnen: frame_count * fps_den * 1_000_000 / fps_num
                             total_duration_us = if meta.fps_num > 0 {
                                 (meta.frame_count as i64) * (meta.fps_den as i64) * 1_000_000
                                     / (meta.fps_num as i64)
                             } else {
                                 0
                             };
-                            nvenc_full_gpu = false; // BRAW: kein HW-Accel
+                            nvenc_full_gpu = false;
                             braw_meta = Some(meta);
+                            r3d_meta  = None;
                         }
                         Err(e) => {
                             let _ = response_tx
@@ -265,11 +268,35 @@ pub async fn run_queue(
                             continue;
                         }
                     }
+                } else if is_r3d {
+                    match r3d_runner::probe_r3d_metadata(&input_path_clone).await {
+                        Ok(meta) => {
+                            total_duration_us = if meta.fps_num > 0 {
+                                (meta.frame_count as i64) * (meta.fps_den as i64) * 1_000_000
+                                    / (meta.fps_num as i64)
+                            } else {
+                                0
+                            };
+                            nvenc_full_gpu = false;
+                            r3d_meta  = Some(meta);
+                            braw_meta = None;
+                        }
+                        Err(e) => {
+                            let _ = response_tx
+                                .send(Response::JobError {
+                                    id: job_id.clone(),
+                                    message: format!(
+                                        "R3D-Metadaten konnten nicht gelesen werden: {e}"
+                                    ),
+                                })
+                                .await;
+                            continue;
+                        }
+                    }
                 } else {
                     braw_meta = None;
+                    r3d_meta  = None;
                     // Dauer und Pixel-Format der Quelldatei ermitteln (parallel via ffprobe).
-                    // Das Pixel-Format wird benoetigt um fuer NVENC die optimale Pipeline
-                    // zu waehlen (volle GPU vs. Hybrid mit CPU-Format-Konvertierung).
                     let needs_pix_fmt = matches!(job.mode, JobMode::Proxy)
                         && job.options.hw_accel == "nvenc";
                     let (duration_result, pix_fmt) = tokio::join!(
@@ -313,8 +340,8 @@ pub async fn run_queue(
                 job.attach_to_parent_token(&shutdown_token);
                 let cancel_token = job.cancel_token.clone();
 
-                // FFmpeg-Args nur fuer nicht-BRAW-Jobs aufbauen
-                let args = if is_braw {
+                // FFmpeg-Args nur fuer normale (nicht-Bridge) Jobs aufbauen
+                let args = if is_braw || is_r3d {
                     Vec::new() // wird nicht benutzt
                 } else {
                     build_ffmpeg_args(
@@ -400,12 +427,27 @@ pub async fn run_queue(
                     // Event-Channel fuer diesen Job-Lauf
                     let (event_tx, mut event_rx) = mpsc::channel::<FfmpegEvent>(64);
 
-                    // Job in eigenem Task starten (BRAW oder FFmpeg)
+                    // Job in eigenem Task starten (BRAW, R3D oder FFmpeg)
                     let task_id = job_id.clone();
                     let task_handle = if is_braw {
                         let meta = braw_meta.unwrap(); // sicher: is_braw → braw_meta = Some
                         tokio::spawn(async move {
                             braw_runner::run_braw_job(
+                                task_id,
+                                job_input_path,
+                                output_path,
+                                &job_options,
+                                meta,
+                                event_tx,
+                                cancel_token,
+                                pid_slot,
+                            )
+                            .await
+                        })
+                    } else if is_r3d {
+                        let meta = r3d_meta.unwrap(); // sicher: is_r3d → r3d_meta = Some
+                        tokio::spawn(async move {
+                            r3d_runner::run_r3d_job(
                                 task_id,
                                 job_input_path,
                                 output_path,
@@ -493,7 +535,7 @@ pub async fn run_queue(
                         }
                     }
 
-                    let task_label = if is_braw { "braw-bridge" } else { "FFmpeg" };
+                    let task_label = if is_braw { "braw-bridge" } else if is_r3d { "r3d-bridge" } else { "FFmpeg" };
                     match task_handle.await {
                         Ok(Ok(())) => {}  // Normale Beendigung: terminales Event wurde bereits gesendet
                         Ok(Err(e)) => {

@@ -43,7 +43,7 @@ from PyQt6.QtWidgets import (
 from proxy_generator.i18n import get_language, set_language, tr
 from proxy_generator.models.job import Job, JobMode, JobOptions, JobStatus
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".braw"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".braw", ".r3d"}
 
 # Table column indices
 COL_FILENAME = 0
@@ -84,6 +84,19 @@ class SettingsDialog(QDialog):
             self._combo_debayer.setCurrentIndex(idx)
         bl.addWidget(self._combo_debayer)
         layout.addWidget(grp_braw)
+
+        # -- R3D ----------------------------------------------------------------
+        grp_r3d = QGroupBox(tr("grp.r3d_settings"))
+        rl = QVBoxLayout(grp_r3d)
+        rl.addWidget(QLabel(tr("lbl.r3d_debayer")))
+        self._combo_r3d_debayer = QComboBox()
+        self._combo_r3d_debayer.addItems(["Premium", "Half", "Quarter", "Eighth"])
+        r3d_debayer = settings.value("r3d_debayer_quality", "Half")
+        idx = self._combo_r3d_debayer.findText(str(r3d_debayer))
+        if idx >= 0:
+            self._combo_r3d_debayer.setCurrentIndex(idx)
+        rl.addWidget(self._combo_r3d_debayer)
+        layout.addWidget(grp_r3d)
 
         # -- Hardware-Encoding --------------------------------------------------
         grp_hw = QGroupBox(tr("grp.hw"))
@@ -155,6 +168,10 @@ class SettingsDialog(QDialog):
         return self._combo_debayer.currentText()
 
     @property
+    def r3d_debayer_quality(self) -> str:
+        return self._combo_r3d_debayer.currentText()
+
+    @property
     def hw_accel(self) -> str:
         hw_map = {
             "Keins / None": "none",
@@ -187,6 +204,7 @@ class MainWindow(QMainWindow):
 
         # Settings-Werte (aus QSettings geladen, via SettingsDialog aenderbar)
         self._debayer_quality: str = "Half"
+        self._r3d_debayer_quality: str = "Half"
         self._hw_accel: str = "none"
         self._parallel_jobs: int = 1
 
@@ -474,6 +492,7 @@ class MainWindow(QMainWindow):
             output_subfolder=self._edit_subfolder.text().strip(),
             skip_if_exists=self._chk_skip_existing.isChecked(),
             debayer_quality=self._debayer_quality,
+            r3d_debayer_quality=self._r3d_debayer_quality,
         )
 
     def _on_start_pause_resume(self) -> None:
@@ -536,11 +555,13 @@ class MainWindow(QMainWindow):
 
         # Werte übernehmen
         self._debayer_quality = dlg.debayer_quality
+        self._r3d_debayer_quality = dlg.r3d_debayer_quality
         self._hw_accel = dlg.hw_accel
         self._parallel_jobs = dlg.parallel_jobs
 
         # Settings speichern
         self._settings.setValue("debayer_quality", self._debayer_quality)
+        self._settings.setValue("r3d_debayer_quality", self._r3d_debayer_quality)
         self._settings.setValue("hw_accel", dlg._combo_hw.currentText())
         self._settings.setValue("parallel_jobs", self._parallel_jobs)
         self._settings.setValue("language", dlg.language)
@@ -590,7 +611,9 @@ class MainWindow(QMainWindow):
         options = self._gather_options()
 
         braw_paths = [p for p in paths if Path(p).suffix.lower() == ".braw"]
-        other_paths = [p for p in paths if Path(p).suffix.lower() != ".braw"]
+        r3d_paths  = [p for p in paths if Path(p).suffix.lower() == ".r3d"]
+        other_paths = [p for p in paths
+                       if Path(p).suffix.lower() not in (".braw", ".r3d")]
 
         # BRAW im ReWrap-Modus: warnen und überspringen
         if braw_paths and selected_mode == JobMode.REWRAP:
@@ -601,6 +624,15 @@ class MainWindow(QMainWindow):
             )
             braw_paths = []
 
+        # R3D im ReWrap-Modus: warnen und überspringen
+        if r3d_paths and selected_mode == JobMode.REWRAP:
+            QMessageBox.warning(
+                self,
+                tr("dlg.r3d_rewrap_title"),
+                tr("dlg.r3d_rewrap_msg").format(n=len(r3d_paths)),
+            )
+            r3d_paths = []
+
         count_before = len(self._vm.jobs)
 
         # BRAW-Dateien als BrawProxy mit Debayer aus Einstellungen
@@ -609,13 +641,19 @@ class MainWindow(QMainWindow):
             braw_options.proxy_resolution = None  # BRAW nutzt keinen FFmpeg-Scale
             self._vm.add_files(braw_paths, output_dir, JobMode.BRAW_PROXY, braw_options)
 
-        # Nicht-BRAW-Dateien mit gewähltem Modus
+        # R3D-Dateien als R3dProxy mit Debayer aus Einstellungen
+        if r3d_paths:
+            r3d_options = self._gather_options()
+            r3d_options.proxy_resolution = None  # R3D nutzt keinen FFmpeg-Scale
+            self._vm.add_files(r3d_paths, output_dir, JobMode.R3D_PROXY, r3d_options)
+
+        # Nicht-RAW-Dateien mit gewähltem Modus
         if other_paths:
             self._vm.add_files(other_paths, output_dir, selected_mode, options)
 
         count_after = len(self._vm.jobs)
         added = count_after - count_before
-        total = len(braw_paths) + len(other_paths)
+        total = len(braw_paths) + len(r3d_paths) + len(other_paths)
         if added == 0 and total > 0:
             QMessageBox.warning(self, tr("dlg.error_title"), tr("dlg.no_jobs_added"))
         elif added < total:
@@ -733,6 +771,7 @@ class MainWindow(QMainWindow):
             JobMode.REWRAP: "Re-Wrap",
             JobMode.PROXY: "Proxy",
             JobMode.BRAW_PROXY: "BRAW Proxy",
+            JobMode.R3D_PROXY: "R3D Proxy",
         }
         mode_label = mode_label_map.get(job.mode, str(job.mode))
         status_label = tr(_STATUS_KEY.get(job.status, "status.error"))
@@ -805,6 +844,7 @@ class MainWindow(QMainWindow):
 
         # Settings aus Dialog
         self._debayer_quality = str(self._settings.value("debayer_quality", "Half"))
+        self._r3d_debayer_quality = str(self._settings.value("r3d_debayer_quality", "Half"))
         hw_display = str(self._settings.value("hw_accel", "Keins / None"))
         hw_map = {"Keins / None": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}
         self._hw_accel = hw_map.get(hw_display, "none")
@@ -831,6 +871,7 @@ class MainWindow(QMainWindow):
         # Settings aus Dialog (werden bereits in _on_settings gespeichert,
         # hier zur Sicherheit nochmals)
         self._settings.setValue("debayer_quality", self._debayer_quality)
+        self._settings.setValue("r3d_debayer_quality", self._r3d_debayer_quality)
         self._settings.setValue("parallel_jobs", self._parallel_jobs)
         hw_display_map = {"none": "Keins / None", "nvenc": "NVENC (Nvidia)", "vaapi": "VAAPI (AMD/Intel)"}
         self._settings.setValue("hw_accel", hw_display_map.get(self._hw_accel, "Keins / None"))

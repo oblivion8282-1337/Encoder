@@ -10,6 +10,7 @@ class JobMode(Enum):
     REWRAP = "re_wrap"
     PROXY = "proxy"
     BRAW_PROXY = "braw_proxy"
+    R3D_PROXY = "r3d_proxy"
 
 
 class JobStatus(Enum):
@@ -30,6 +31,7 @@ class JobOptions:
     output_subfolder: str = ""
     skip_if_exists: bool = False
     debayer_quality: str = "full"
+    r3d_debayer_quality: str = "half"
 
 
 @dataclass

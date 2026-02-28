@@ -53,6 +53,13 @@ _STRINGS: dict[str, dict[str, str]] = {
     "grp.lang":         {"de": "Sprache",                 "en": "Language"},
     "grp.naming":       {"de": "Ausgabe-Benennung",       "en": "Output Naming"},
     "grp.braw_settings":{"de": "BRAW (Blackmagic RAW)",   "en": "BRAW (Blackmagic RAW)"},
+    "grp.r3d_settings": {"de": "R3D (RED RAW)",           "en": "R3D (RED RAW)"},
+    "lbl.r3d_debayer":  {"de": "Debayer-Qualität:",       "en": "Debayer Quality:"},
+    "dlg.r3d_rewrap_title": {"de": "R3D nicht unterstützt", "en": "R3D not supported"},
+    "dlg.r3d_rewrap_msg": {
+        "de": "{n} R3D-Datei(en) wurden übersprungen.\nR3D kann nicht als Re-Wrap verarbeitet werden.\nBitte Proxy-Modus wählen.",
+        "en": "{n} R3D file(s) were skipped.\nR3D cannot be processed as Re-Wrap.\nPlease select Proxy mode.",
+    },
     "grp.style":        {"de": "Qt-Stil",                 "en": "Qt Style"},
     "style.system_default": {"de": "System-Standard",    "en": "System Default"},
     "lbl.suffix":       {"de": "Suffix:",     "en": "Suffix:"},
