@@ -493,6 +493,18 @@ pub async fn run_queue(
                 slot_free.notify_waiters();
             }
             JobCommand::Cancel(id) => {
+                // Falls der FFmpeg-Prozess via SIGSTOP pausiert ist, zuerst
+                // SIGCONT senden – sonst kann er 'q' nicht verarbeiten und
+                // child.wait() blockiert endlos.
+                {
+                    let pids = ffmpeg_pids.read().await;
+                    if let Some(pid_slot) = pids.get(&id) {
+                        let pid = pid_slot.load(Ordering::Acquire);
+                        if pid != 0 {
+                            unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT); }
+                        }
+                    }
+                }
                 let map = jobs.read().await;
                 if let Some(job) = map.get(&id) {
                     job.cancel_token.cancel();
