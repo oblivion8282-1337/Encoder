@@ -39,10 +39,6 @@
   <rect x="200" y="156" width="8" height="8" rx="2" fill="#0288d1" opacity="0.8"/>
   <rect x="214" y="156" width="8" height="8" rx="2" fill="#0288d1" opacity="0.8"/>
 
-  <!-- Pfeil von groß nach klein -->
-  <line x1="138" y1="95" x2="152" y2="120" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
-  <polygon points="152,120 142,110 158,112" fill="white" opacity="0.9"/>
-
   <!-- "PROXY" Label unten -->
   <text x="128" y="218" font-family="sans-serif" font-weight="700" font-size="26"
         fill="white" text-anchor="middle" opacity="0.9" letter-spacing="4">PROXY</text>
