@@ -489,9 +489,12 @@ int main(int argc, char* argv[])
     }
 
     // --- Emit metadata JSON ---
-
+    // Immer die volle Sensoraufloesung berichten; der Rust-Runner berechnet
+    // die tatsaechliche Ausgabedimension basierend auf der gewaehlten
+    // Debayer-Qualitaet selbst (out_width/out_height werden nur fuer den
+    // Frame-Buffer intern verwendet).
     json_metadata(timecode.c_str(), fps_num, fps_den,
-                  (uint32_t)out_width, (uint32_t)out_height, (uint64_t)frame_count);
+                  (uint32_t)full_width, (uint32_t)full_height, (uint64_t)frame_count);
     fflush(stderr);
 
     if (opts.probe_only)
