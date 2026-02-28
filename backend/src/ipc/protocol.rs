@@ -30,6 +30,12 @@ pub enum Request {
     #[serde(rename = "set_max_parallel")]
     SetMaxParallel { n: usize },
 
+    #[serde(rename = "pause_all")]
+    PauseAll,
+
+    #[serde(rename = "resume_all")]
+    ResumeAll,
+
     #[serde(rename = "shutdown")]
     Shutdown,
 }

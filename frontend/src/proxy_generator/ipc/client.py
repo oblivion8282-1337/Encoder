@@ -14,6 +14,8 @@ from proxy_generator.ipc.protocol import (
     AddJobRequest,
     CancelJobRequest,
     GetStatusRequest,
+    PauseAllRequest,
+    ResumeAllRequest,
     SetMaxParallelRequest,
     ShutdownRequest,
     parse_response,
@@ -122,6 +124,14 @@ class IpcClient:
     def set_max_parallel(self, n: int) -> None:
         """Send a set_max_parallel request."""
         self._send_message(SetMaxParallelRequest(n=max(1, n)).to_dict())
+
+    def pause_all(self) -> None:
+        """Send a pause_all request."""
+        self._send_message(PauseAllRequest().to_dict())
+
+    def resume_all(self) -> None:
+        """Send a resume_all request."""
+        self._send_message(ResumeAllRequest().to_dict())
 
     def cancel_job(self, job_id: str) -> None:
         """Send a cancel_job request."""

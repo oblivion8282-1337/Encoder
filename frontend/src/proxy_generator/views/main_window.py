@@ -102,8 +102,9 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
 
         self._act_start = QAction("", self)
-        self._act_start.triggered.connect(self._on_start_all)
+        self._act_start.triggered.connect(self._on_start_pause_resume)
         tb.addAction(self._act_start)
+        self._start_state = "idle"  # "idle" | "running" | "paused"
 
         self._act_clear = QAction("", self)
         self._act_clear.triggered.connect(self._on_clear_done)
@@ -269,7 +270,7 @@ class MainWindow(QMainWindow):
         # Toolbar
         self._act_add_files.setText(tr("toolbar.add_files"))
         self._act_add_folder.setText(tr("toolbar.add_folder"))
-        self._act_start.setText(tr("toolbar.start_all"))
+        self._set_start_state(self._start_state)
         self._act_clear.setText(tr("toolbar.clear_done"))
         self._act_clear_all.setText(tr("toolbar.clear_all"))
 
@@ -374,15 +375,32 @@ class MainWindow(QMainWindow):
             skip_if_exists=self._chk_skip_existing.isChecked(),
         )
 
-    def _on_start_all(self) -> None:
+    def _on_start_pause_resume(self) -> None:
         if self._vm is None:
             return
-        if not self._vm.jobs:
-            QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
-            return
-        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
-        self._vm.start_all(mode, self._gather_options())
-        self._statusbar.showMessage(tr("statusbar.started"), 3000)
+        if self._start_state == "idle":
+            if not self._vm.jobs:
+                QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
+                return
+            mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+            self._vm.start_all(mode, self._gather_options())
+            self._set_start_state("running")
+            self._statusbar.showMessage(tr("statusbar.started"), 3000)
+        elif self._start_state == "running":
+            self._vm.pause_all()
+            self._set_start_state("paused")
+        elif self._start_state == "paused":
+            self._vm.resume_all()
+            self._set_start_state("running")
+
+    def _set_start_state(self, state: str) -> None:
+        self._start_state = state
+        if state == "idle":
+            self._act_start.setText(tr("toolbar.start_all"))
+        elif state == "running":
+            self._act_start.setText(tr("toolbar.pause"))
+        elif state == "paused":
+            self._act_start.setText(tr("toolbar.resume"))
 
     def _on_clear_done(self) -> None:
         if self._vm is None:
@@ -551,6 +569,11 @@ class MainWindow(QMainWindow):
         done = sum(1 for j in jobs if j.status == JobStatus.DONE)
         self._status_label.setText(
             tr("statusbar.summary").format(total=total, running=running, done=done))
+        # Button zurücksetzen wenn keine Jobs mehr laufen oder warten
+        if self._start_state in ("running", "paused"):
+            active = any(j.status in (JobStatus.QUEUED, JobStatus.RUNNING) for j in jobs)
+            if not active:
+                self._set_start_state("idle")
 
     # -- settings persistence ---------------------------------------------------
 

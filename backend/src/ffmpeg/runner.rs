@@ -3,6 +3,8 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -334,6 +336,7 @@ pub async fn run_ffmpeg(
     total_duration_us: i64,
     tx: mpsc::Sender<FfmpegEvent>,
     cancel: CancellationToken,
+    pid_slot: Arc<AtomicU32>,
 ) -> Result<()> {
     let mut child = Command::new("ffmpeg")
         .args(&args)
@@ -342,6 +345,9 @@ pub async fn run_ffmpeg(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .context("FFmpeg konnte nicht gestartet werden")?;
+
+    // PID registrieren damit Pause/Resume den Prozess signalisieren kann
+    pid_slot.store(child.id().unwrap_or(0), Ordering::Release);
 
     let stderr = child
         .stderr
@@ -364,6 +370,7 @@ pub async fn run_ffmpeg(
                     let _ = stdin_handle.flush().await;
                 }
                 let _ = child.wait().await;
+                pid_slot.store(0, Ordering::Release);
                 let _ = tx
                     .send(FfmpegEvent::Cancelled {
                         id: job_id.clone(),
@@ -378,6 +385,7 @@ pub async fn run_ffmpeg(
                             if progress.is_done {
                                 // Warten bis der Prozess beendet ist
                                 let status = child.wait().await?;
+                                pid_slot.store(0, Ordering::Release);
                                 if status.success() {
                                     let _ = tx
                                         .send(FfmpegEvent::Done { id: job_id.clone() })
@@ -421,6 +429,7 @@ pub async fn run_ffmpeg(
                     Ok(None) => {
                         // stderr geschlossen – Prozess beendet
                         let status = child.wait().await?;
+                        pid_slot.store(0, Ordering::Release);
                         if status.success() {
                             let _ = tx
                                 .send(FfmpegEvent::Done { id: job_id.clone() })
@@ -441,6 +450,7 @@ pub async fn run_ffmpeg(
                     Err(e) => {
                         let _ = child.kill().await;
                         let _ = child.wait().await;  // Zombie verhindern
+                        pid_slot.store(0, Ordering::Release);
                         let _ = tx
                             .send(FfmpegEvent::Error {
                                 id: job_id.clone(),

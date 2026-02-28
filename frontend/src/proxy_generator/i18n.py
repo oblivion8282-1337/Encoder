@@ -31,6 +31,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toolbar.add_files":  {"de": "Dateien hinzufügen",  "en": "Add Files"},
     "toolbar.add_folder": {"de": "Ordner hinzufügen",   "en": "Add Folder"},
     "toolbar.start_all":  {"de": "Alles starten",       "en": "Start All"},
+    "toolbar.pause":      {"de": "Pausieren",            "en": "Pause"},
+    "toolbar.resume":     {"de": "Fortsetzen",           "en": "Resume"},
     "toolbar.clear_done": {"de": "Fertige entfernen",   "en": "Remove Done"},
     "toolbar.clear_all":  {"de": "Queue leeren",        "en": "Clear Queue"},
     # ── Tabellen-Header ────────────────────────────────────────────────────

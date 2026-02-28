@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -11,6 +11,8 @@ use tokio::sync::{mpsc, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::ffmpeg::runner::{self, build_ffmpeg_args, FfmpegEvent};
+#[allow(unused_imports)]
+use libc;
 use crate::ipc::protocol::{JobMode, JobOptions, JobState, JobStatus, Response};
 
 /// Validiert einen Pfad gegen Path-Traversal-Angriffe.
@@ -99,6 +101,8 @@ pub enum JobCommand {
     Add(Job),
     Cancel(String),
     SetMaxParallel(usize),
+    PauseAll,
+    ResumeAll,
     GetStatus(tokio::sync::oneshot::Sender<Vec<JobStatus>>),
 }
 
@@ -140,6 +144,16 @@ impl JobQueue {
         Ok(())
     }
 
+    pub async fn pause_all(&self) -> Result<()> {
+        self.cmd_tx.send(JobCommand::PauseAll).await?;
+        Ok(())
+    }
+
+    pub async fn resume_all(&self) -> Result<()> {
+        self.cmd_tx.send(JobCommand::ResumeAll).await?;
+        Ok(())
+    }
+
     pub async fn get_status(&self) -> Result<Vec<JobStatus>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.cmd_tx.send(JobCommand::GetStatus(tx)).await?;
@@ -157,6 +171,10 @@ pub async fn run_queue(
     let limit = Arc::new(AtomicUsize::new(max_parallel.max(1)));
     let running = Arc::new(AtomicUsize::new(0));
     let slot_free = Arc::new(Notify::new());
+    let is_paused = Arc::new(AtomicBool::new(false));
+    // job_id → PID des laufenden FFmpeg-Prozesses (0 = noch nicht gestartet)
+    let ffmpeg_pids: Arc<RwLock<HashMap<String, Arc<AtomicU32>>>> =
+        Arc::new(RwLock::new(HashMap::new()));
     let jobs: Arc<RwLock<HashMap<String, Job>>> = Arc::new(RwLock::new(HashMap::new()));
 
     while let Some(cmd) = cmd_rx.recv().await {
@@ -277,13 +295,30 @@ pub async fn run_queue(
                 let limit_ref = limit.clone();
                 let running_ref = running.clone();
                 let slot_free_ref = slot_free.clone();
+                let is_paused_ref = is_paused.clone();
+                let pid_slot = Arc::new(AtomicU32::new(0));
+                {
+                    ffmpeg_pids.write().await.insert(job_id.clone(), pid_slot.clone());
+                }
+                let ffmpeg_pids_ref = ffmpeg_pids.clone();
                 let resp_tx = response_tx.clone();
                 let jobs_ref = jobs.clone();
                 let job_id_for_monitor = job_id.clone();
 
                 let handle = tokio::spawn(async move {
-                    // Warten bis ein Slot frei ist – oder Job wird gecancelt
+                    // Warten bis ein Slot frei ist UND nicht pausiert – oder Job wird gecancelt
                     loop {
+                        if is_paused_ref.load(Ordering::Acquire) {
+                            tokio::select! {
+                                _ = slot_free_ref.notified() => continue,
+                                _ = cancel_token.cancelled() => {
+                                    ffmpeg_pids_ref.write().await.remove(&job_id);
+                                    jobs_ref.write().await.remove(&job_id);
+                                    let _ = resp_tx.send(Response::JobCancelled { id: job_id.clone() }).await;
+                                    return;
+                                }
+                            }
+                        }
                         let cur = running_ref.load(Ordering::Acquire);
                         let lim = limit_ref.load(Ordering::Acquire);
                         if cur < lim {
@@ -297,6 +332,7 @@ pub async fn run_queue(
                             tokio::select! {
                                 _ = slot_free_ref.notified() => {}
                                 _ = cancel_token.cancelled() => {
+                                    ffmpeg_pids_ref.write().await.remove(&job_id);
                                     jobs_ref.write().await.remove(&job_id);
                                     let _ = resp_tx.send(Response::JobCancelled { id: job_id.clone() }).await;
                                     return;
@@ -325,6 +361,7 @@ pub async fn run_queue(
                             total_duration_us,
                             event_tx,
                             cancel_token,
+                            pid_slot,
                         )
                         .await
                     });
@@ -412,7 +449,8 @@ pub async fn run_queue(
                     running_ref.fetch_sub(1, Ordering::AcqRel);
                     slot_free_ref.notify_waiters();
 
-                    // Job aus HashMap entfernen (terminaler Zustand erreicht)
+                    // PID-Eintrag und Job aus HashMaps entfernen
+                    ffmpeg_pids_ref.write().await.remove(&job_id);
                     jobs_ref.write().await.remove(&job_id);
                 });
 
@@ -430,6 +468,28 @@ pub async fn run_queue(
             }
             JobCommand::SetMaxParallel(n) => {
                 limit.store(n.max(1), Ordering::Release);
+                slot_free.notify_waiters();
+            }
+            JobCommand::PauseAll => {
+                is_paused.store(true, Ordering::Release);
+                let pids = ffmpeg_pids.read().await;
+                for pid_slot in pids.values() {
+                    let pid = pid_slot.load(Ordering::Acquire);
+                    if pid != 0 {
+                        unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP); }
+                    }
+                }
+            }
+            JobCommand::ResumeAll => {
+                is_paused.store(false, Ordering::Release);
+                let pids = ffmpeg_pids.read().await;
+                for pid_slot in pids.values() {
+                    let pid = pid_slot.load(Ordering::Acquire);
+                    if pid != 0 {
+                        unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT); }
+                    }
+                }
+                drop(pids);
                 slot_free.notify_waiters();
             }
             JobCommand::Cancel(id) => {

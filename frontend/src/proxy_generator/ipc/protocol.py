@@ -48,6 +48,18 @@ class GetStatusRequest:
 
 
 @dataclass
+class PauseAllRequest:
+    def to_dict(self) -> dict:
+        return {"type": "pause_all"}
+
+
+@dataclass
+class ResumeAllRequest:
+    def to_dict(self) -> dict:
+        return {"type": "resume_all"}
+
+
+@dataclass
 class SetMaxParallelRequest:
     n: int
 

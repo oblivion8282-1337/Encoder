@@ -113,6 +113,18 @@ class QueueViewModel(QObject):
         except (RuntimeError, BrokenPipeError, OSError) as e:
             log.error("Failed to set max_parallel: %s", e)
 
+    def pause_all(self) -> None:
+        try:
+            self._client.pause_all()
+        except (RuntimeError, BrokenPipeError, OSError) as e:
+            log.error("Failed to pause: %s", e)
+
+    def resume_all(self) -> None:
+        try:
+            self._client.resume_all()
+        except (RuntimeError, BrokenPipeError, OSError) as e:
+            log.error("Failed to resume: %s", e)
+
     def cancel_job(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
         if job is None:
