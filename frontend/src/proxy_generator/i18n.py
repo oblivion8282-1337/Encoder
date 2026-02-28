@@ -30,7 +30,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     # ── Toolbar ────────────────────────────────────────────────────────────
     "toolbar.add_files":  {"de": "Dateien hinzufügen",  "en": "Add Files"},
     "toolbar.add_folder": {"de": "Ordner hinzufügen",   "en": "Add Folder"},
-    "toolbar.start_all":  {"de": "Alles starten",       "en": "Start All"},
+    "toolbar.start_all":      {"de": "Alles starten",          "en": "Start All"},
+    "toolbar.start_selected": {"de": "Auswahl starten",        "en": "Start Selected"},
     "toolbar.pause":      {"de": "Pausieren",            "en": "Pause"},
     "toolbar.resume":     {"de": "Fortsetzen",           "en": "Resume"},
     "toolbar.cancel_all": {"de": "Abbrechen",            "en": "Cancel All"},
@@ -72,6 +73,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "status.error":     {"de": "Fehler",     "en": "Error"},
     "status.cancelled": {"de": "Abgebrochen","en": "Cancelled"},
     # ── Kontextmenü ────────────────────────────────────────────────────────
+    "ctx.start":  {"de": "Starten",      "en": "Start"},
     "ctx.reset":  {"de": "Zurücksetzen", "en": "Reset"},
     "ctx.cancel": {"de": "Abbrechen",    "en": "Cancel"},
     "ctx.remove": {"de": "Entfernen",    "en": "Remove"},

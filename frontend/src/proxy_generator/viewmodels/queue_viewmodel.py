@@ -70,6 +70,22 @@ class QueueViewModel(QObject):
             self._order.append(job.id)
         self.jobs_changed.emit()
 
+    def start_selected(self, job_ids: list[str], mode: JobMode, options: JobOptions) -> None:
+        """Nur die angegebenen Jobs ans Backend senden und starten."""
+        for job_id in job_ids:
+            job = self._jobs.get(job_id)
+            if job is None or job_id in self._submitted:
+                continue
+            if job.status != JobStatus.QUEUED:
+                continue
+            job.mode = mode
+            job.options = options
+            try:
+                self._client.add_job(job)
+                self._submitted.add(job_id)
+            except (RuntimeError, BrokenPipeError, OSError) as e:
+                log.error("Failed to submit job %s: %s", job.input_path, e)
+
     def start_all(self, mode: JobMode, options: JobOptions) -> None:
         """Alle lokal wartenden Jobs ans Backend senden und starten.
 

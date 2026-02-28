@@ -39,7 +39,7 @@ from PyQt6.QtWidgets import (
 from proxy_generator.i18n import get_language, set_language, tr
 from proxy_generator.models.job import Job, JobMode, JobOptions, JobStatus
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".r3d", ".braw"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv"}
 
 # Table column indices
 COL_FILENAME = 0
@@ -106,6 +106,11 @@ class MainWindow(QMainWindow):
         tb.addAction(self._act_start)
         self._start_state = "idle"  # "idle" | "running" | "paused"
 
+        self._act_start_selected = QAction("", self)
+        self._act_start_selected.triggered.connect(self._on_start_selected)
+        self._act_start_selected.setEnabled(False)
+        tb.addAction(self._act_start_selected)
+
         self._act_cancel_all = QAction("", self)
         self._act_cancel_all.triggered.connect(self._on_cancel_all)
         self._act_cancel_all.setEnabled(False)
@@ -135,6 +140,7 @@ class MainWindow(QMainWindow):
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self._table.installEventFilter(self)
+        self._table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         header = self._table.horizontalHeader()
         header.setStretchLastSection(True)
         header.setSectionResizeMode(COL_FILENAME, QHeaderView.ResizeMode.Stretch)
@@ -276,6 +282,7 @@ class MainWindow(QMainWindow):
         self._act_add_files.setText(tr("toolbar.add_files"))
         self._act_add_folder.setText(tr("toolbar.add_folder"))
         self._set_start_state(self._start_state)
+        self._act_start_selected.setText(tr("toolbar.start_selected"))
         self._act_cancel_all.setText(tr("toolbar.cancel_all"))
         self._act_clear.setText(tr("toolbar.clear_done"))
         self._act_clear_all.setText(tr("toolbar.clear_all"))
@@ -437,6 +444,36 @@ class MainWindow(QMainWindow):
             else:
                 self._grp_proxy.setVisible(button_id == 1)
 
+    def _selected_job_ids(self) -> list[str]:
+        """Gibt die Job-IDs aller selektierten Zeilen zurück."""
+        if self._vm is None:
+            return []
+        jobs = self._vm.jobs
+        rows = {idx.row() for idx in self._table.selectedIndexes()}
+        return [jobs[r].id for r in sorted(rows) if r < len(jobs)]
+
+    def _on_selection_changed(self) -> None:
+        if self._vm is None:
+            return
+        jobs = self._vm.jobs
+        rows = {idx.row() for idx in self._table.selectedIndexes()}
+        has_queued = any(
+            jobs[r].status == JobStatus.QUEUED
+            for r in rows if r < len(jobs)
+        )
+        self._act_start_selected.setEnabled(has_queued)
+
+    def _on_start_selected(self) -> None:
+        if self._vm is None:
+            return
+        job_ids = self._selected_job_ids()
+        if not job_ids:
+            return
+        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+        self._vm.start_selected(job_ids, mode, self._gather_options())
+        if self._start_state == "idle":
+            self._set_start_state("running")
+
     def _on_cancel_all(self) -> None:
         if self._vm is None:
             return
@@ -464,7 +501,21 @@ class MainWindow(QMainWindow):
             return
         job = jobs[row]
 
+        # Alle selektierten Zeilen für Mehrfach-Aktionen
+        selected_ids = self._selected_job_ids()
+        if job.id not in selected_ids:
+            selected_ids = [job.id]
+
         menu = QMenu(self)
+        act_start = menu.addAction(tr("ctx.start"))
+        startable = [
+            jid for jid in selected_ids
+            if self._vm and self._vm._jobs.get(jid) and
+            self._vm._jobs[jid].status == JobStatus.QUEUED and
+            jid not in self._vm._submitted
+        ]
+        act_start.setEnabled(bool(startable))
+        menu.addSeparator()
         act_reset = menu.addAction(tr("ctx.reset"))
         act_reset.setEnabled(
             job.status in (JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED))
@@ -476,7 +527,12 @@ class MainWindow(QMainWindow):
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action is None or self._vm is None:
             return
-        if action == act_reset:
+        if action == act_start:
+            mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+            self._vm.start_selected(startable, mode, self._gather_options())
+            if self._start_state == "idle":
+                self._set_start_state("running")
+        elif action == act_reset:
             self._vm.reset_job(job.id)
         elif action == act_cancel:
             self._vm.cancel_job(job.id)
