@@ -18,8 +18,13 @@ async fn main() -> Result<()> {
     // Channel fuer Responses (von Job-Queue an stdout-Writer)
     let (response_tx, response_rx) = mpsc::channel::<Response>(256);
 
-    // Job-Queue initialisieren (max 2 parallele Jobs)
-    let max_parallel = 2;
+    // max_parallel aus CLI-Argument lesen (--max-parallel N), Fallback: 1
+    let max_parallel = std::env::args()
+        .skip_while(|a| a != "--max-parallel")
+        .nth(1)
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or(1);
     let (queue, cmd_rx) = JobQueue::new(max_parallel, response_tx.clone());
     let global_shutdown_token = queue.shutdown_token();
     let queue = Arc::new(queue);

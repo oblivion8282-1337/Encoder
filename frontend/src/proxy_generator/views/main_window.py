@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QEvent, QSettings
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self._table.installEventFilter(self)
         header = self._table.horizontalHeader()
         header.setStretchLastSection(True)
         header.setSectionResizeMode(COL_FILENAME, QHeaderView.ResizeMode.Stretch)
@@ -227,10 +228,16 @@ class MainWindow(QMainWindow):
         # -- Parallel jobs ------------------------------------------------------
         self._grp_par = QGroupBox("")
         prl = QVBoxLayout(self._grp_par)
+        cpu_count = os.cpu_count() or 8
+        par_row = QHBoxLayout()
         self._spin_parallel = QSpinBox()
-        self._spin_parallel.setRange(1, 8)
+        self._spin_parallel.setRange(1, cpu_count)
         self._spin_parallel.setValue(1)
-        prl.addWidget(self._spin_parallel)
+        self._spin_parallel.valueChanged.connect(self._on_parallel_changed)
+        par_row.addWidget(self._spin_parallel)
+        par_row.addWidget(QLabel(f"/ {cpu_count}"))
+        par_row.addStretch()
+        prl.addLayout(par_row)
         layout.addWidget(self._grp_par)
 
         # -- Language -----------------------------------------------------------
@@ -405,6 +412,10 @@ class MainWindow(QMainWindow):
                 self._grp_proxy.setVisible(self._rb_proxy.isChecked())
             else:
                 self._grp_proxy.setVisible(button_id == 1)
+
+    def _on_parallel_changed(self, value: int) -> None:
+        if self._vm is not None:
+            self._vm.set_max_parallel(value)
 
     def _on_language_changed(self, index: int) -> None:
         lang = "de" if index == 0 else "en"
@@ -606,11 +617,11 @@ class MainWindow(QMainWindow):
         paths = []
         for url in event.mimeData().urls():
             path = url.toLocalFile()
-            if Path(path).suffix.lower() in VIDEO_EXTENSIONS:
+            if Path(path).is_file() and Path(path).suffix.lower() in VIDEO_EXTENSIONS:
                 paths.append(path)
             elif Path(path).is_dir():
                 for f in Path(path).rglob("*"):
-                    if f.suffix.lower() in VIDEO_EXTENSIONS:
+                    if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS:
                         paths.append(str(f))
         if paths:
             self._submit_jobs(paths)
@@ -630,6 +641,22 @@ class MainWindow(QMainWindow):
                 tr("dlg.job_error_title"),
                 f"{Path(job.input_path).name}\n\n{job.error}",
             )
+
+    # -- keyboard shortcuts -----------------------------------------------------
+
+    def eventFilter(self, source, event) -> bool:
+        if (source is self._table
+                and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Delete
+                and self._vm is not None):
+            for row in sorted(
+                {idx.row() for idx in self._table.selectedIndexes()}, reverse=True
+            ):
+                jobs = self._vm.jobs
+                if row < len(jobs):
+                    self._vm.remove_job(jobs[row].id)
+            return True
+        return super().eventFilter(source, event)
 
     # -- cleanup ----------------------------------------------------------------
 

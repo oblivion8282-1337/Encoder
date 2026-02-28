@@ -73,6 +73,11 @@ pub async fn read_stdin(
                     Err(e) => eprintln!("Fehler beim Abfragen des Status: {e}"),
                 }
             }
+            Request::SetMaxParallel { n } => {
+                if let Err(e) = queue.set_max_parallel(n).await {
+                    eprintln!("Fehler beim Setzen von max_parallel: {e}");
+                }
+            }
             Request::Shutdown => {
                 let _ = shutdown_tx.send(());
                 return Ok(());

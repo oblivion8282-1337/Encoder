@@ -48,6 +48,14 @@ class GetStatusRequest:
 
 
 @dataclass
+class SetMaxParallelRequest:
+    n: int
+
+    def to_dict(self) -> dict:
+        return {"type": "set_max_parallel", "n": self.n}
+
+
+@dataclass
 class ShutdownRequest:
     def to_dict(self) -> dict:
         return {"type": "shutdown"}

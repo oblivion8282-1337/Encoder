@@ -107,6 +107,12 @@ class QueueViewModel(QObject):
         self._worker.signals.connection_lost.connect(self._on_connection_lost)
         QThreadPool.globalInstance().start(self._worker)
 
+    def set_max_parallel(self, n: int) -> None:
+        try:
+            self._client.set_max_parallel(n)
+        except (RuntimeError, BrokenPipeError, OSError) as e:
+            log.error("Failed to set max_parallel: %s", e)
+
     def cancel_job(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
         if job is None:

@@ -27,6 +27,9 @@ pub enum Request {
     #[serde(rename = "get_status")]
     GetStatus,
 
+    #[serde(rename = "set_max_parallel")]
+    SetMaxParallel { n: usize },
+
     #[serde(rename = "shutdown")]
     Shutdown,
 }

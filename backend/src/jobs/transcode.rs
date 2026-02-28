@@ -3,10 +3,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{mpsc, RwLock, Semaphore};
+use tokio::sync::{mpsc, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::ffmpeg::runner::{self, build_ffmpeg_args, FfmpegEvent};
@@ -97,6 +98,7 @@ impl Job {
 pub enum JobCommand {
     Add(Job),
     Cancel(String),
+    SetMaxParallel(usize),
     GetStatus(tokio::sync::oneshot::Sender<Vec<JobStatus>>),
 }
 
@@ -133,6 +135,11 @@ impl JobQueue {
         Ok(())
     }
 
+    pub async fn set_max_parallel(&self, n: usize) -> Result<()> {
+        self.cmd_tx.send(JobCommand::SetMaxParallel(n.max(1))).await?;
+        Ok(())
+    }
+
     pub async fn get_status(&self) -> Result<Vec<JobStatus>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.cmd_tx.send(JobCommand::GetStatus(tx)).await?;
@@ -147,7 +154,9 @@ pub async fn run_queue(
     response_tx: mpsc::Sender<Response>,
     shutdown_token: CancellationToken,
 ) {
-    let semaphore = Arc::new(Semaphore::new(max_parallel));
+    let limit = Arc::new(AtomicUsize::new(max_parallel.max(1)));
+    let running = Arc::new(AtomicUsize::new(0));
+    let slot_free = Arc::new(Notify::new());
     let jobs: Arc<RwLock<HashMap<String, Job>>> = Arc::new(RwLock::new(HashMap::new()));
 
     while let Some(cmd) = cmd_rx.recv().await {
@@ -265,34 +274,36 @@ pub async fn run_queue(
                     .send(Response::JobQueued { id: job_id.clone() })
                     .await;
 
-                let sem = semaphore.clone();
+                let limit_ref = limit.clone();
+                let running_ref = running.clone();
+                let slot_free_ref = slot_free.clone();
                 let resp_tx = response_tx.clone();
                 let jobs_ref = jobs.clone();
                 let job_id_for_monitor = job_id.clone();
 
                 let handle = tokio::spawn(async move {
                     // Warten bis ein Slot frei ist – oder Job wird gecancelt
-                    let _permit = tokio::select! {
-                        result = sem.acquire() => {
-                            match result {
-                                Ok(p) => p,
-                                Err(_) => {
-                                    let _ = resp_tx.send(Response::JobError {
-                                        id: job_id.clone(),
-                                        message: "Semaphore geschlossen, Job kann nicht starten".to_string(),
-                                    }).await;
+                    loop {
+                        let cur = running_ref.load(Ordering::Acquire);
+                        let lim = limit_ref.load(Ordering::Acquire);
+                        if cur < lim {
+                            if running_ref
+                                .compare_exchange(cur, cur + 1, Ordering::AcqRel, Ordering::Acquire)
+                                .is_ok()
+                            {
+                                break;
+                            }
+                        } else {
+                            tokio::select! {
+                                _ = slot_free_ref.notified() => {}
+                                _ = cancel_token.cancelled() => {
                                     jobs_ref.write().await.remove(&job_id);
+                                    let _ = resp_tx.send(Response::JobCancelled { id: job_id.clone() }).await;
                                     return;
                                 }
                             }
                         }
-                        _ = cancel_token.cancelled() => {
-                            // Job wurde gecancelt bevor er starten konnte
-                            jobs_ref.write().await.remove(&job_id);
-                            let _ = resp_tx.send(Response::JobCancelled { id: job_id.clone() }).await;
-                            return;
-                        }
-                    };
+                    }
 
                     // Status auf Running setzen
                     {
@@ -397,6 +408,10 @@ pub async fn run_queue(
                         }
                     }
 
+                    // Slot freigeben und wartende Jobs benachrichtigen
+                    running_ref.fetch_sub(1, Ordering::AcqRel);
+                    slot_free_ref.notify_waiters();
+
                     // Job aus HashMap entfernen (terminaler Zustand erreicht)
                     jobs_ref.write().await.remove(&job_id);
                 });
@@ -412,6 +427,10 @@ pub async fn run_queue(
                         }).await;
                     }
                 });
+            }
+            JobCommand::SetMaxParallel(n) => {
+                limit.store(n.max(1), Ordering::Release);
+                slot_free.notify_waiters();
             }
             JobCommand::Cancel(id) => {
                 let map = jobs.read().await;

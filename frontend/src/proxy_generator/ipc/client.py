@@ -14,6 +14,7 @@ from proxy_generator.ipc.protocol import (
     AddJobRequest,
     CancelJobRequest,
     GetStatusRequest,
+    SetMaxParallelRequest,
     ShutdownRequest,
     parse_response,
 )
@@ -64,13 +65,13 @@ class IpcClient:
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
-    def start(self) -> None:
+    def start(self, max_parallel: int = 1) -> None:
         """Start the backend subprocess."""
         if self.is_running:
             return
-        log.info("Starting backend: %s", self._backend_path)
+        log.info("Starting backend: %s (max_parallel=%d)", self._backend_path, max_parallel)
         self._process = subprocess.Popen(
-            [self._backend_path],
+            [self._backend_path, "--max-parallel", str(max_parallel)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -117,6 +118,10 @@ class IpcClient:
             options=options,
         )
         self._send_message(req.to_dict())
+
+    def set_max_parallel(self, n: int) -> None:
+        """Send a set_max_parallel request."""
+        self._send_message(SetMaxParallelRequest(n=max(1, n)).to_dict())
 
     def cancel_job(self, job_id: str) -> None:
         """Send a cancel_job request."""
