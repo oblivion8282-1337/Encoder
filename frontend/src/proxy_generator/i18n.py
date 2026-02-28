@@ -33,6 +33,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toolbar.start_all":  {"de": "Alles starten",       "en": "Start All"},
     "toolbar.pause":      {"de": "Pausieren",            "en": "Pause"},
     "toolbar.resume":     {"de": "Fortsetzen",           "en": "Resume"},
+    "toolbar.cancel_all": {"de": "Abbrechen",            "en": "Cancel All"},
     "toolbar.clear_done": {"de": "Fertige entfernen",   "en": "Remove Done"},
     "toolbar.clear_all":  {"de": "Queue leeren",        "en": "Clear Queue"},
     # ── Tabellen-Header ────────────────────────────────────────────────────

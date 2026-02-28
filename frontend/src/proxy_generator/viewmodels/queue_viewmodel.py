@@ -125,6 +125,20 @@ class QueueViewModel(QObject):
         except (RuntimeError, BrokenPipeError, OSError) as e:
             log.error("Failed to resume: %s", e)
 
+    def cancel_all(self) -> None:
+        """Alle laufenden und wartenden Jobs abbrechen (bleiben in der Liste)."""
+        for job_id, job in list(self._jobs.items()):
+            if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+                if job_id in self._submitted:
+                    try:
+                        self._client.cancel_job(job_id)
+                    except (RuntimeError, BrokenPipeError, OSError) as e:
+                        log.error("Failed to cancel job %s: %s", job_id, e)
+                else:
+                    # Noch nicht ans Backend gesendet → lokal zurücksetzen
+                    job.status = JobStatus.CANCELLED
+                    self.job_updated.emit(job_id)
+
     def cancel_job(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
         if job is None:

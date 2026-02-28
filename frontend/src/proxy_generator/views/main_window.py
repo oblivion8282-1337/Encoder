@@ -106,6 +106,11 @@ class MainWindow(QMainWindow):
         tb.addAction(self._act_start)
         self._start_state = "idle"  # "idle" | "running" | "paused"
 
+        self._act_cancel_all = QAction("", self)
+        self._act_cancel_all.triggered.connect(self._on_cancel_all)
+        self._act_cancel_all.setEnabled(False)
+        tb.addAction(self._act_cancel_all)
+
         self._act_clear = QAction("", self)
         self._act_clear.triggered.connect(self._on_clear_done)
         tb.addAction(self._act_clear)
@@ -271,6 +276,7 @@ class MainWindow(QMainWindow):
         self._act_add_files.setText(tr("toolbar.add_files"))
         self._act_add_folder.setText(tr("toolbar.add_folder"))
         self._set_start_state(self._start_state)
+        self._act_cancel_all.setText(tr("toolbar.cancel_all"))
         self._act_clear.setText(tr("toolbar.clear_done"))
         self._act_clear_all.setText(tr("toolbar.clear_all"))
 
@@ -431,6 +437,12 @@ class MainWindow(QMainWindow):
             else:
                 self._grp_proxy.setVisible(button_id == 1)
 
+    def _on_cancel_all(self) -> None:
+        if self._vm is None:
+            return
+        self._vm.cancel_all()
+        self._set_start_state("idle")
+
     def _on_parallel_changed(self, value: int) -> None:
         if self._vm is not None:
             self._vm.set_max_parallel(value)
@@ -570,10 +582,10 @@ class MainWindow(QMainWindow):
         self._status_label.setText(
             tr("statusbar.summary").format(total=total, running=running, done=done))
         # Button zurücksetzen wenn keine Jobs mehr laufen oder warten
-        if self._start_state in ("running", "paused"):
-            active = any(j.status in (JobStatus.QUEUED, JobStatus.RUNNING) for j in jobs)
-            if not active:
-                self._set_start_state("idle")
+        active = any(j.status in (JobStatus.QUEUED, JobStatus.RUNNING) for j in jobs)
+        if self._start_state in ("running", "paused") and not active:
+            self._set_start_state("idle")
+        self._act_cancel_all.setEnabled(active)
 
     # -- settings persistence ---------------------------------------------------
 
