@@ -332,12 +332,14 @@ fn push_prores(args: &mut Vec<String>, codec: &str, resolution: Option<&str>) {
 ///
 /// * `job_id` – Eindeutige Job-ID fuer die Events
 /// * `args` – Komplette FFmpeg-Argumentliste
+/// * `output_path` – Pfad zur Output-Datei; wird bei Fehler-Exit geloescht (partial file cleanup)
 /// * `total_duration_us` – Gesamtdauer der Quelldatei in Mikrosekunden (fuer Prozentberechnung)
 /// * `tx` – Channel fuer Events
 /// * `cancel` – CancellationToken zum Abbrechen
 pub async fn run_ffmpeg(
     job_id: String,
     args: Vec<String>,
+    output_path: &Path,
     total_duration_us: i64,
     tx: mpsc::Sender<FfmpegEvent>,
     cancel: CancellationToken,
@@ -396,6 +398,7 @@ pub async fn run_ffmpeg(
                                         .send(FfmpegEvent::Done { id: job_id.clone() })
                                         .await;
                                 } else {
+                                    let _ = std::fs::remove_file(output_path); // partial file cleanup
                                     let _ = tx
                                         .send(FfmpegEvent::Error {
                                             id: job_id.clone(),
@@ -440,6 +443,7 @@ pub async fn run_ffmpeg(
                                 .send(FfmpegEvent::Done { id: job_id.clone() })
                                 .await;
                         } else {
+                            let _ = std::fs::remove_file(output_path); // partial file cleanup
                             let _ = tx
                                 .send(FfmpegEvent::Error {
                                     id: job_id.clone(),
@@ -456,6 +460,7 @@ pub async fn run_ffmpeg(
                         let _ = child.kill().await;
                         let _ = child.wait().await;  // Zombie verhindern
                         pid_slot.store(0, Ordering::Release);
+                        let _ = std::fs::remove_file(output_path); // partial file cleanup
                         let _ = tx
                             .send(FfmpegEvent::Error {
                                 id: job_id.clone(),

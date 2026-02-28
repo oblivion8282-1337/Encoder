@@ -422,6 +422,7 @@ pub async fn run_queue(
                             runner::run_ffmpeg(
                                 task_id,
                                 args,
+                                &output_path,
                                 total_duration_us,
                                 event_tx,
                                 cancel_token,

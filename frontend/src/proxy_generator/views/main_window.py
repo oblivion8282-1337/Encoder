@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
         start = self._output_dir_edit.text().strip() or str(Path.home())
         folder = QFileDialog.getExistingDirectory(self, tr("fdlg.output_folder"), start)
         if folder:
-            self._edit_subfolder.setText(folder)
+            self._edit_subfolder.setText(Path(folder).name)
 
     def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
@@ -832,6 +832,8 @@ class MainWindow(QMainWindow):
         # hier zur Sicherheit nochmals)
         self._settings.setValue("debayer_quality", self._debayer_quality)
         self._settings.setValue("parallel_jobs", self._parallel_jobs)
+        hw_display_map = {"none": "Keins / None", "nvenc": "NVENC (Nvidia)", "vaapi": "VAAPI (AMD/Intel)"}
+        self._settings.setValue("hw_accel", hw_display_map.get(self._hw_accel, "Keins / None"))
 
     # -- drag & drop ------------------------------------------------------------
 

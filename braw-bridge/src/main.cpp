@@ -30,9 +30,28 @@
 // Utility: write NDJSON to stderr
 // ---------------------------------------------------------------------------
 
+static std::string json_escape(const char* s)
+{
+    std::string out;
+    for (; *s; ++s)
+    {
+        switch (*s)
+        {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:   out += *s;     break;
+        }
+    }
+    return out;
+}
+
 static void json_error(const char* msg)
 {
-    fprintf(stderr, "{\"type\":\"error\",\"message\":\"%s\"}\n", msg);
+    std::string escaped = json_escape(msg);
+    fprintf(stderr, "{\"type\":\"error\",\"message\":\"%s\"}\n", escaped.c_str());
 }
 
 static void json_metadata(const char* timecode, uint32_t fps_num, uint32_t fps_den,
@@ -73,7 +92,14 @@ static bool write_wav(const char* path, const void* samples, uint64_t sample_cou
 
     uint32_t byte_rate = sample_rate * channels * (bits_per_sample / 8);
     uint32_t block_align = channels * (bits_per_sample / 8);
-    uint32_t data_size = (uint32_t)(sample_count * channels * (bits_per_sample / 8));
+    uint64_t data_size_64 = (uint64_t)sample_count * channels * (bits_per_sample / 8);
+    if (data_size_64 > 0xFFFFFFFFULL)
+    {
+        json_error("Audio data too large for WAV format (exceeds 4 GiB)");
+        fclose(f);
+        return false;
+    }
+    uint32_t data_size = (uint32_t)data_size_64;
     uint32_t riff_size = 36 + data_size;
 
     // RIFF header
@@ -355,6 +381,11 @@ static bool extract_audio(IBlackmagicRawClip* clip, const char* output_path)
     {
         uint32_t samples_read = 0;
         uint32_t bytes_read = 0;
+        if (sample_idx > UINT32_MAX)
+        {
+            fprintf(stderr, "{\"type\":\"warning\",\"message\":\"Audio sample index exceeds UINT32_MAX; truncating audio output\"}\n");
+            break;
+        }
         hr = audio->GetAudioSamples((uint32_t)sample_idx, chunk_buf, chunk_buf_bytes,
                                      kChunkSamples, &samples_read, &bytes_read);
         if (FAILED(hr) || samples_read == 0)
@@ -513,10 +544,26 @@ int main(int argc, char* argv[])
     // --- Get clip properties ---
 
     uint64_t frame_count = 0;
-    clip->GetFrameCount(&frame_count);
+    hr = clip->GetFrameCount(&frame_count);
+    if (FAILED(hr))
+    {
+        json_error("GetFrameCount failed");
+        clip->Release();
+        codec->Release();
+        factory->Release();
+        return 1;
+    }
 
     float frame_rate = 0.0f;
-    clip->GetFrameRate(&frame_rate);
+    hr = clip->GetFrameRate(&frame_rate);
+    if (FAILED(hr))
+    {
+        json_error("GetFrameRate failed");
+        clip->Release();
+        codec->Release();
+        factory->Release();
+        return 1;
+    }
 
     // GetFrameRate returns float; convert to rational num/den
     uint32_t fps_num = 0, fps_den = 1;
@@ -556,8 +603,24 @@ int main(int argc, char* argv[])
     }
 
     uint32_t width = 0, height = 0;
-    clip->GetWidth(&width);
-    clip->GetHeight(&height);
+    hr = clip->GetWidth(&width);
+    if (FAILED(hr))
+    {
+        json_error("GetWidth failed");
+        clip->Release();
+        codec->Release();
+        factory->Release();
+        return 1;
+    }
+    hr = clip->GetHeight(&height);
+    if (FAILED(hr))
+    {
+        json_error("GetHeight failed");
+        clip->Release();
+        codec->Release();
+        factory->Release();
+        return 1;
+    }
 
     // Adjust dimensions for debayer resolution scale
     if (opts.resolution_scale == blackmagicRawResolutionScaleHalf)
