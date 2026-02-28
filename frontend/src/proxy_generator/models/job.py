@@ -9,6 +9,7 @@ import uuid
 class JobMode(Enum):
     REWRAP = "re_wrap"
     PROXY = "proxy"
+    BRAW_PROXY = "braw_proxy"
 
 
 class JobStatus(Enum):
@@ -28,6 +29,7 @@ class JobOptions:
     output_suffix: str = ""
     output_subfolder: str = ""
     skip_if_exists: bool = False
+    debayer_quality: str = "full"
 
 
 @dataclass

@@ -39,7 +39,7 @@ from PyQt6.QtWidgets import (
 from proxy_generator.i18n import get_language, set_language, tr
 from proxy_generator.models.job import Job, JobMode, JobOptions, JobStatus
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".braw"}
 
 # Table column indices
 COL_FILENAME = 0
@@ -178,11 +178,14 @@ class MainWindow(QMainWindow):
         self._mode_group = QButtonGroup(self)
         self._rb_rewrap = QRadioButton("")
         self._rb_proxy = QRadioButton("")
+        self._rb_braw = QRadioButton("")
         self._mode_group.addButton(self._rb_rewrap, 0)
         self._mode_group.addButton(self._rb_proxy, 1)
+        self._mode_group.addButton(self._rb_braw, 2)
         self._rb_rewrap.setChecked(True)
         ml.addWidget(self._rb_rewrap)
         ml.addWidget(self._rb_proxy)
+        ml.addWidget(self._rb_braw)
         layout.addWidget(self._grp_mode)
 
         # -- Proxy settings (only visible in proxy mode) ------------------------
@@ -204,6 +207,12 @@ class MainWindow(QMainWindow):
         ])
         self._combo_codec.currentTextChanged.connect(self._on_codec_changed)
         pl.addWidget(self._combo_codec)
+
+        self._lbl_debayer = QLabel("")
+        pl.addWidget(self._lbl_debayer)
+        self._combo_debayer = QComboBox()
+        self._combo_debayer.addItems(["Full", "Half", "Quarter"])
+        pl.addWidget(self._combo_debayer)
 
         layout.addWidget(self._grp_proxy)
         self._grp_proxy.setVisible(False)
@@ -304,9 +313,11 @@ class MainWindow(QMainWindow):
         self._grp_mode.setTitle(tr("grp.mode"))
         self._rb_rewrap.setText(tr("rb.rewrap"))
         self._rb_proxy.setText(tr("rb.proxy"))
+        self._rb_braw.setText(tr("rb.braw"))
         self._grp_proxy.setTitle(tr("grp.proxy"))
         self._lbl_resolution.setText(tr("lbl.resolution"))
         self._lbl_codec.setText(tr("lbl.codec"))
+        self._lbl_debayer.setText(tr("lbl.debayer"))
         self._grp_naming.setTitle(tr("grp.naming"))
         self._lbl_suffix.setText(tr("lbl.suffix"))
         self._edit_suffix.setPlaceholderText(tr("placeholder.suffix"))
@@ -379,6 +390,7 @@ class MainWindow(QMainWindow):
             "NVENC (Nvidia)": "nvenc",
             "VAAPI (AMD/Intel)": "vaapi",
         }
+        debayer_map = {"Full": "full", "Half": "half", "Quarter": "quarter"}
         return JobOptions(
             proxy_resolution=resolution_map.get(self._combo_resolution.currentText()),
             proxy_codec=codec_map.get(self._combo_codec.currentText(), "h264"),
@@ -386,6 +398,7 @@ class MainWindow(QMainWindow):
             output_suffix=self._edit_suffix.text(),
             output_subfolder=self._edit_subfolder.text().strip(),
             skip_if_exists=self._chk_skip_existing.isChecked(),
+            debayer_quality=debayer_map.get(self._combo_debayer.currentText(), "full"),
         )
 
     def _on_start_pause_resume(self) -> None:
@@ -395,7 +408,12 @@ class MainWindow(QMainWindow):
             if not self._vm.jobs:
                 QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
                 return
-            mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+            if self._rb_braw.isChecked():
+                mode = JobMode.BRAW_PROXY
+            elif self._rb_proxy.isChecked():
+                mode = JobMode.PROXY
+            else:
+                mode = JobMode.REWRAP
             self._vm.start_all(mode, self._gather_options())
             self._set_start_state("running")
             self._statusbar.showMessage(tr("statusbar.started"), 3000)
@@ -440,9 +458,14 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
             if button_id == -1:
-                self._grp_proxy.setVisible(self._rb_proxy.isChecked())
+                show_proxy = self._rb_proxy.isChecked() or self._rb_braw.isChecked()
+                is_braw = self._rb_braw.isChecked()
             else:
-                self._grp_proxy.setVisible(button_id == 1)
+                show_proxy = button_id in (1, 2)
+                is_braw = button_id == 2
+            self._grp_proxy.setVisible(show_proxy)
+            self._lbl_debayer.setVisible(is_braw)
+            self._combo_debayer.setVisible(is_braw)
 
     def _selected_job_ids(self) -> list[str]:
         """Gibt die Job-IDs aller selektierten Zeilen zurück."""
@@ -469,7 +492,12 @@ class MainWindow(QMainWindow):
         job_ids = self._selected_job_ids()
         if not job_ids:
             return
-        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+        if self._rb_braw.isChecked():
+            mode = JobMode.BRAW_PROXY
+        elif self._rb_proxy.isChecked():
+            mode = JobMode.PROXY
+        else:
+            mode = JobMode.REWRAP
         self._vm.start_selected(job_ids, mode, self._gather_options())
         if self._start_state == "idle":
             self._set_start_state("running")
@@ -528,7 +556,12 @@ class MainWindow(QMainWindow):
         if action is None or self._vm is None:
             return
         if action == act_start:
-            mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+            if self._rb_braw.isChecked():
+                mode = JobMode.BRAW_PROXY
+            elif self._rb_proxy.isChecked():
+                mode = JobMode.PROXY
+            else:
+                mode = JobMode.REWRAP
             self._vm.start_selected(startable, mode, self._gather_options())
             if self._start_state == "idle":
                 self._set_start_state("running")
@@ -558,7 +591,12 @@ class MainWindow(QMainWindow):
                                 tr("dlg.output_no_write") + output_dir)
             return
 
-        mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+        if self._rb_braw.isChecked():
+            mode = JobMode.BRAW_PROXY
+        elif self._rb_proxy.isChecked():
+            mode = JobMode.PROXY
+        else:
+            mode = JobMode.REWRAP
         options = self._gather_options()
 
         count_before = len(self._vm.jobs)
@@ -596,7 +634,12 @@ class MainWindow(QMainWindow):
 
     def _set_row(self, row: int, job: Job) -> None:
         filename = Path(job.input_path).name
-        mode_label = "Re-Wrap" if job.mode == JobMode.REWRAP else "Proxy"
+        mode_label_map = {
+            JobMode.REWRAP: "Re-Wrap",
+            JobMode.PROXY: "Proxy",
+            JobMode.BRAW_PROXY: "BRAW Proxy",
+        }
+        mode_label = mode_label_map.get(job.mode, str(job.mode))
         status_label = tr(_STATUS_KEY.get(job.status, "status.error"))
 
         self._table.setItem(row, COL_FILENAME, QTableWidgetItem(filename))
@@ -649,7 +692,9 @@ class MainWindow(QMainWindow):
         self._output_dir_edit.setText(
             self._settings.value("output_dir", str(Path.home())))
         mode = self._settings.value("mode", "rewrap")
-        if mode == "proxy":
+        if mode == "braw_proxy":
+            self._rb_braw.setChecked(True)
+        elif mode == "proxy":
             self._rb_proxy.setChecked(True)
         else:
             self._rb_rewrap.setChecked(True)
@@ -662,6 +707,10 @@ class MainWindow(QMainWindow):
         idx = self._combo_codec.findText(codec)
         if idx >= 0:
             self._combo_codec.setCurrentIndex(idx)
+        debayer = self._settings.value("debayer_quality", "Full")
+        idx = self._combo_debayer.findText(debayer)
+        if idx >= 0:
+            self._combo_debayer.setCurrentIndex(idx)
         hw = self._settings.value("hw_accel", "Keins / None")
         idx = self._combo_hw.findText(hw)
         if idx >= 0:
@@ -685,12 +734,19 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self) -> None:
         self._settings.setValue("output_dir", self._output_dir_edit.text())
-        mode = "proxy" if self._rb_proxy.isChecked() else "rewrap"
+        if self._rb_braw.isChecked():
+            mode = "braw_proxy"
+        elif self._rb_proxy.isChecked():
+            mode = "proxy"
+        else:
+            mode = "rewrap"
         self._settings.setValue("mode", mode)
         self._settings.setValue("proxy_resolution",
                                 self._combo_resolution.currentText())
         self._settings.setValue("proxy_codec",
                                 self._combo_codec.currentText())
+        self._settings.setValue("debayer_quality",
+                                self._combo_debayer.currentText())
         self._settings.setValue("hw_accel", self._combo_hw.currentText())
         self._settings.setValue("parallel_jobs", self._spin_parallel.value())
         self._settings.setValue("output_suffix", self._edit_suffix.text())

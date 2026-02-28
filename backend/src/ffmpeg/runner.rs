@@ -131,6 +131,11 @@ pub fn build_ffmpeg_args(
             args.push("-c:a".to_string());
             args.push("pcm_s16le".to_string());
         }
+        JobMode::BrawProxy => {
+            // BrawProxy wird nicht ueber build_ffmpeg_args abgewickelt –
+            // eigene Arg-Logik in braw::runner::build_braw_ffmpeg_args
+            unreachable!("BrawProxy nutzt eigene FFmpeg-Args via braw::runner");
+        }
     }
 
     // Strukturiertes Progress-Reporting auf stderr
@@ -152,7 +157,7 @@ fn is_prores(codec: &str) -> bool {
 }
 
 /// Waehlt den passenden Video-Encoder anhand von proxy_codec × hw_accel.
-fn push_proxy_codec_args(
+pub fn push_proxy_codec_args(
     args: &mut Vec<String>,
     proxy_codec: &str,
     hw_accel: &str,

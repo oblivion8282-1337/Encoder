@@ -7,6 +7,8 @@ from typing import Optional
 
 from PyQt6.QtWidgets import QMessageBox
 
+from PyQt6.QtCore import QSettings
+
 from proxy_generator.ipc.client import IpcClient, find_backend_binary
 from proxy_generator.viewmodels.queue_viewmodel import QueueViewModel
 from proxy_generator.views.main_window import MainWindow
@@ -33,9 +35,15 @@ def create_app() -> Optional[MainWindow]:
         )
         return None
 
+    settings = QSettings("proxy-generator", "ProxyGenerator")
+    try:
+        max_parallel = int(settings.value("parallel_jobs", 1))
+    except (ValueError, TypeError):
+        max_parallel = 1
+
     client = IpcClient(backend_path)
     try:
-        client.start()
+        client.start(max_parallel=max_parallel)
     except OSError as exc:
         QMessageBox.critical(
             None,

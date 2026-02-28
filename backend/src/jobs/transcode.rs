@@ -10,6 +10,7 @@ use anyhow::Result;
 use tokio::sync::{mpsc, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use crate::braw::runner as braw_runner;
 use crate::ffmpeg::runner::{self, build_ffmpeg_args, FfmpegEvent};
 #[allow(unused_imports)]
 use libc;
@@ -73,7 +74,9 @@ impl Job {
 
         let ext = match self.mode {
             JobMode::ReWrap => "mov",
-            JobMode::Proxy  => if self.options.proxy_codec == "av1" { "mp4" } else { "mov" },
+            JobMode::Proxy | JobMode::BrawProxy => {
+                if self.options.proxy_codec == "av1" { "mp4" } else { "mov" }
+            }
         };
 
         let output_dir = if self.options.output_subfolder.is_empty() {
@@ -228,35 +231,71 @@ pub async fn run_queue(
                 };
                 job.output_dir = output_dir;
 
-                // Dauer und Pixel-Format der Quelldatei ermitteln (parallel via ffprobe).
-                // Das Pixel-Format wird benoetigt um fuer NVENC die optimale Pipeline
-                // zu waehlen (volle GPU vs. Hybrid mit CPU-Format-Konvertierung).
+                // --- Probing: BRAW vs. normale Dateien ---
+                let is_braw = matches!(job.mode, JobMode::BrawProxy);
                 let input_path_clone = job.input_path.clone();
-                let needs_pix_fmt = matches!(job.mode, JobMode::Proxy)
-                    && job.options.hw_accel == "nvenc";
-                let (duration_result, pix_fmt) = tokio::join!(
-                    probe_duration(&input_path_clone),
-                    async {
-                        if needs_pix_fmt {
-                            probe_pix_fmt(&input_path_clone).await
-                        } else {
-                            String::new()
+
+                // BRAW: Metadaten via braw-bridge, sonst ffprobe
+                let braw_meta: Option<braw_runner::BrawMetadata>;
+                let total_duration_us: i64;
+                let nvenc_full_gpu: bool;
+
+                if is_braw {
+                    match braw_runner::probe_braw_metadata(&input_path_clone).await {
+                        Ok(meta) => {
+                            // Dauer berechnen: frame_count * fps_den * 1_000_000 / fps_num
+                            total_duration_us = if meta.fps_num > 0 {
+                                (meta.frame_count as i64) * (meta.fps_den as i64) * 1_000_000
+                                    / (meta.fps_num as i64)
+                            } else {
+                                0
+                            };
+                            nvenc_full_gpu = false; // BRAW: kein HW-Accel
+                            braw_meta = Some(meta);
                         }
-                    },
-                );
-                let total_duration_us = match duration_result {
-                    Ok(d) if d > 0 => d,
-                    Ok(_) | Err(_) => {
-                        let _ = response_tx
-                            .send(Response::JobError {
-                                id: job_id.clone(),
-                                message: "Quelldatei konnte nicht gelesen werden (ffprobe fehlgeschlagen)".to_string(),
-                            })
-                            .await;
-                        continue;
+                        Err(e) => {
+                            let _ = response_tx
+                                .send(Response::JobError {
+                                    id: job_id.clone(),
+                                    message: format!(
+                                        "BRAW-Metadaten konnten nicht gelesen werden: {e}"
+                                    ),
+                                })
+                                .await;
+                            continue;
+                        }
                     }
-                };
-                let nvenc_full_gpu = nvenc_full_gpu_supported(&pix_fmt);
+                } else {
+                    braw_meta = None;
+                    // Dauer und Pixel-Format der Quelldatei ermitteln (parallel via ffprobe).
+                    // Das Pixel-Format wird benoetigt um fuer NVENC die optimale Pipeline
+                    // zu waehlen (volle GPU vs. Hybrid mit CPU-Format-Konvertierung).
+                    let needs_pix_fmt = matches!(job.mode, JobMode::Proxy)
+                        && job.options.hw_accel == "nvenc";
+                    let (duration_result, pix_fmt) = tokio::join!(
+                        probe_duration(&input_path_clone),
+                        async {
+                            if needs_pix_fmt {
+                                probe_pix_fmt(&input_path_clone).await
+                            } else {
+                                String::new()
+                            }
+                        },
+                    );
+                    total_duration_us = match duration_result {
+                        Ok(d) if d > 0 => d,
+                        Ok(_) | Err(_) => {
+                            let _ = response_tx
+                                .send(Response::JobError {
+                                    id: job_id.clone(),
+                                    message: "Quelldatei konnte nicht gelesen werden (ffprobe fehlgeschlagen)".to_string(),
+                                })
+                                .await;
+                            continue;
+                        }
+                    };
+                    nvenc_full_gpu = nvenc_full_gpu_supported(&pix_fmt);
+                }
 
                 // Ausgabedatei bereits vorhanden und Skip aktiviert?
                 let output_path = job.output_path();
@@ -273,13 +312,22 @@ pub async fn run_queue(
                 // Job an globales Shutdown-Token haengen
                 job.attach_to_parent_token(&shutdown_token);
                 let cancel_token = job.cancel_token.clone();
-                let args = build_ffmpeg_args(
-                    &job.input_path,
-                    &output_path,
-                    &job.mode,
-                    &job.options,
-                    nvenc_full_gpu,
-                );
+
+                // FFmpeg-Args nur fuer nicht-BRAW-Jobs aufbauen
+                let args = if is_braw {
+                    Vec::new() // wird nicht benutzt
+                } else {
+                    build_ffmpeg_args(
+                        &job.input_path,
+                        &output_path,
+                        &job.mode,
+                        &job.options,
+                        nvenc_full_gpu,
+                    )
+                };
+
+                let job_input_path = job.input_path.clone();
+                let job_options = job.options.clone();
 
                 job.status = JobState::Queued;
                 {
@@ -349,22 +397,39 @@ pub async fn run_queue(
                         }
                     }
 
-                    // Event-Channel fuer diesen FFmpeg-Lauf
+                    // Event-Channel fuer diesen Job-Lauf
                     let (event_tx, mut event_rx) = mpsc::channel::<FfmpegEvent>(64);
 
-                    // FFmpeg in eigenem Task starten
-                    let ffmpeg_id = job_id.clone();
-                    let ffmpeg_handle = tokio::spawn(async move {
-                        runner::run_ffmpeg(
-                            ffmpeg_id,
-                            args,
-                            total_duration_us,
-                            event_tx,
-                            cancel_token,
-                            pid_slot,
-                        )
-                        .await
-                    });
+                    // Job in eigenem Task starten (BRAW oder FFmpeg)
+                    let task_id = job_id.clone();
+                    let task_handle = if is_braw {
+                        let meta = braw_meta.unwrap(); // sicher: is_braw → braw_meta = Some
+                        tokio::spawn(async move {
+                            braw_runner::run_braw_job(
+                                task_id,
+                                job_input_path,
+                                output_path,
+                                &job_options,
+                                meta,
+                                event_tx,
+                                cancel_token,
+                                pid_slot,
+                            )
+                            .await
+                        })
+                    } else {
+                        tokio::spawn(async move {
+                            runner::run_ffmpeg(
+                                task_id,
+                                args,
+                                total_duration_us,
+                                event_tx,
+                                cancel_token,
+                                pid_slot,
+                            )
+                            .await
+                        })
+                    };
 
                     // Events weiterleiten an IPC
                     while let Some(event) = event_rx.recv().await {
@@ -427,20 +492,19 @@ pub async fn run_queue(
                         }
                     }
 
-                    match ffmpeg_handle.await {
+                    let task_label = if is_braw { "braw-bridge" } else { "FFmpeg" };
+                    match task_handle.await {
                         Ok(Ok(())) => {}  // Normale Beendigung: terminales Event wurde bereits gesendet
                         Ok(Err(e)) => {
-                            // run_ffmpeg schlug fehl ohne Event zu senden (z.B. ffmpeg nicht gefunden)
                             let _ = resp_tx.send(Response::JobError {
                                 id: job_id.clone(),
-                                message: format!("FFmpeg konnte nicht ausgefuehrt werden: {e}"),
+                                message: format!("{task_label} konnte nicht ausgefuehrt werden: {e}"),
                             }).await;
                         }
                         Err(e) => {
-                            // FFmpeg-Task panikt (sehr selten)
                             let _ = resp_tx.send(Response::JobError {
                                 id: job_id.clone(),
-                                message: format!("FFmpeg-Task Panik: {e}"),
+                                message: format!("{task_label}-Task Panik: {e}"),
                             }).await;
                         }
                     }

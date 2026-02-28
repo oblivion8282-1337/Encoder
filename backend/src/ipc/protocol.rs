@@ -45,6 +45,7 @@ pub enum Request {
 pub enum JobMode {
     ReWrap,
     Proxy,
+    BrawProxy,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -72,6 +73,10 @@ pub struct JobOptions {
     /// Wenn true: Job sofort als Done markieren wenn Ausgabedatei bereits existiert.
     #[serde(default)]
     pub skip_if_exists: bool,
+
+    /// Debayer-Qualitaet fuer BRAW: "full" | "half" | "quarter"
+    #[serde(default = "default_debayer_quality")]
+    pub debayer_quality: String,
 }
 
 impl Default for JobOptions {
@@ -84,6 +89,7 @@ impl Default for JobOptions {
             output_suffix: default_output_suffix(),
             output_subfolder: String::new(),
             skip_if_exists: false,
+            debayer_quality: default_debayer_quality(),
         }
     }
 }
@@ -102,6 +108,10 @@ fn default_hw_accel() -> String {
 
 fn default_output_suffix() -> String {
     String::new()
+}
+
+fn default_debayer_quality() -> String {
+    "full".to_string()
 }
 
 // ---------------------------------------------------------------------------

@@ -64,6 +64,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "lbl.codec":          {"de": "Codec:",                   "en": "Codec:"},
     "rb.rewrap":          {"de": "Re-Wrap (Audio umkodieren)", "en": "Re-Wrap (transcode audio)"},
     "rb.proxy":           {"de": "Proxy (Transkodierung)",   "en": "Proxy (transcode)"},
+    "rb.braw":            {"de": "BRAW Proxy (Blackmagic RAW)", "en": "BRAW Proxy (Blackmagic RAW)"},
+    "lbl.debayer":        {"de": "Debayer-Qualität:", "en": "Debayer Quality:"},
     "tooltip.prores_cpu": {"de": "ProRes wird immer per CPU enkodiert.",
                            "en": "ProRes is always encoded on CPU."},
     # ── Job-Status ─────────────────────────────────────────────────────────

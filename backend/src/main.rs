@@ -1,6 +1,7 @@
 // Einstiegspunkt des Rust-Backends.
 // Startet den IPC-Server (stdin/stdout NDJSON) und die Job-Queue.
 
+mod braw;
 mod ffmpeg;
 mod ipc;
 mod jobs;

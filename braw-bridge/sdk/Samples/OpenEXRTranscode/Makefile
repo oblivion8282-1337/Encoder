@@ -1,0 +1,33 @@
+CXX=g++
+CXXFLAGS=-g -std=c++17 
+SDKDIR=../../Include
+INCLUDES=-I$(SDKDIR) -I/usr/local/include/OpenEXR -I/usr/local/include/Imath
+
+TARGETNAME=OpenEXRTranscode
+LIBRARYNAME=BlackmagicRawAPIDispatch
+OPENEXR_LIB_PATH=/usr/local/lib64/
+OPENEXR_STATIC_LIBS=$(OPENEXR_LIB_PATH)libOpenEXR-3_1.a $(OPENEXR_LIB_PATH)libOpenEXRCore-3_1.a $(OPENEXR_LIB_PATH)libOpenEXRUtil-3_1.a $(OPENEXR_LIB_PATH)libImath-3_1.a $(OPENEXR_LIB_PATH)libIex-3_1.a $(OPENEXR_LIB_PATH)libIlmThread-3_1.a
+OPENEXR_DYN_LIBS=$(OPENEXR_LIB_PATH)libOpenEXR.so $(OPENEXR_LIB_PATH)libOpenEXRCore.so $(OPENEXR_LIB_PATH)libOpenEXRUtil.so
+OPENEXR_LIBS=$(OPENEXR_STATIC_LIBS)
+LIBS=-lpthread -ldl -lstdc++fs -lz
+
+all: $(TARGETNAME) cleanobj
+.PHONY : all
+
+debug: CXXFLAGS += -DDEBUG
+debug: all
+
+$(TARGETNAME) : $(TARGETNAME).o $(LIBRARYNAME).o
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(TARGETNAME) $(TARGETNAME).o $(LIBRARYNAME).o $(LIBS) $(OPENEXR_LIBS)
+
+$(TARGETNAME).o : $(TARGETNAME).cpp $(SDKDIR)/$(LIBRARYNAME).cpp $(SDKDIR)/BlackmagicRawAPI.h $(SDKDIR)/LinuxCOM.h
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $(TARGETNAME).cpp
+
+$(LIBRARYNAME).o : $(SDKDIR)/$(LIBRARYNAME).cpp $(SDKDIR)/BlackmagicRawAPI.h
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $(SDKDIR)/$(LIBRARYNAME).cpp
+
+clean:
+	$(RM) $(TARGETNAME) $(TARGETNAME).o $(LIBRARYNAME).o
+
+cleanobj:
+	$(RM) $(TARGETNAME).o $(LIBRARYNAME).o
