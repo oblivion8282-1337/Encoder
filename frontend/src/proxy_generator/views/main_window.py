@@ -11,8 +11,11 @@ from PyQt6.QtCore import Qt, QEvent, QSettings
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -29,6 +32,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStatusBar,
+    QStyleFactory,
     QTableWidget,
     QTableWidgetItem,
     QToolBar,
@@ -59,6 +63,120 @@ _STATUS_KEY = {
 }
 
 
+class SettingsDialog(QDialog):
+    """Einstellungs-Dialog: BRAW-Debayer, HW-Encoding, Parallele Jobs, Sprache."""
+
+    def __init__(self, settings: QSettings, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("dlg.settings_title"))
+        self.setMinimumWidth(320)
+        layout = QVBoxLayout(self)
+
+        # -- BRAW ---------------------------------------------------------------
+        grp_braw = QGroupBox(tr("grp.braw_settings"))
+        bl = QVBoxLayout(grp_braw)
+        bl.addWidget(QLabel(tr("lbl.debayer")))
+        self._combo_debayer = QComboBox()
+        self._combo_debayer.addItems(["Full", "Half", "Quarter"])
+        debayer = settings.value("debayer_quality", "Half")
+        idx = self._combo_debayer.findText(str(debayer))
+        if idx >= 0:
+            self._combo_debayer.setCurrentIndex(idx)
+        bl.addWidget(self._combo_debayer)
+        layout.addWidget(grp_braw)
+
+        # -- Hardware-Encoding --------------------------------------------------
+        grp_hw = QGroupBox(tr("grp.hw"))
+        hl = QVBoxLayout(grp_hw)
+        self._combo_hw = QComboBox()
+        self._combo_hw.addItems(["Keins / None", "NVENC (Nvidia)", "VAAPI (AMD/Intel)"])
+        hw = settings.value("hw_accel", "Keins / None")
+        idx = self._combo_hw.findText(str(hw))
+        if idx >= 0:
+            self._combo_hw.setCurrentIndex(idx)
+        hl.addWidget(self._combo_hw)
+        layout.addWidget(grp_hw)
+
+        # -- Parallele Jobs -----------------------------------------------------
+        grp_par = QGroupBox(tr("grp.parallel"))
+        prl = QVBoxLayout(grp_par)
+        cpu_count = os.cpu_count() or 8
+        par_row = QHBoxLayout()
+        self._spin_parallel = QSpinBox()
+        self._spin_parallel.setRange(1, cpu_count)
+        try:
+            self._spin_parallel.setValue(int(settings.value("parallel_jobs", 1)))
+        except (ValueError, TypeError):
+            self._spin_parallel.setValue(1)
+        par_row.addWidget(self._spin_parallel)
+        par_row.addWidget(QLabel(f"/ {cpu_count}"))
+        par_row.addStretch()
+        prl.addLayout(par_row)
+        layout.addWidget(grp_par)
+
+        # -- Sprache ------------------------------------------------------------
+        grp_lang = QGroupBox(tr("grp.lang"))
+        ll = QVBoxLayout(grp_lang)
+        self._combo_lang = QComboBox()
+        self._combo_lang.addItems(["Deutsch", "English"])
+        lang = settings.value("language", "de")
+        self._combo_lang.setCurrentIndex(0 if lang == "de" else 1)
+        ll.addWidget(self._combo_lang)
+        layout.addWidget(grp_lang)
+
+        # -- Qt-Stil ------------------------------------------------------------
+        grp_style = QGroupBox(tr("grp.style"))
+        sl = QVBoxLayout(grp_style)
+        self._combo_style = QComboBox()
+        available_styles = QStyleFactory.keys()
+        self._combo_style.addItem(tr("style.system_default"), userData="")
+        for s in available_styles:
+            self._combo_style.addItem(s, userData=s)
+        saved_style = str(settings.value("qt_style", ""))
+        # Breeze als Standard wenn nichts gespeichert und verfügbar
+        if not saved_style and "Breeze" in QStyleFactory.keys():
+            saved_style = "Breeze"
+        idx = self._combo_style.findData(saved_style)
+        if idx >= 0:
+            self._combo_style.setCurrentIndex(idx)
+        sl.addWidget(self._combo_style)
+        layout.addWidget(grp_style)
+
+        # -- Buttons ------------------------------------------------------------
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @property
+    def debayer_quality(self) -> str:
+        return self._combo_debayer.currentText()
+
+    @property
+    def hw_accel(self) -> str:
+        hw_map = {
+            "Keins / None": "none",
+            "NVENC (Nvidia)": "nvenc",
+            "VAAPI (AMD/Intel)": "vaapi",
+        }
+        return hw_map.get(self._combo_hw.currentText(), "none")
+
+    @property
+    def parallel_jobs(self) -> int:
+        return self._spin_parallel.value()
+
+    @property
+    def language(self) -> str:
+        return "de" if self._combo_lang.currentIndex() == 0 else "en"
+
+    @property
+    def qt_style(self) -> str:
+        """Gibt den gewählten Style-Namen zurück, oder '' für System-Default."""
+        return self._combo_style.currentData() or ""
+
+
 class MainWindow(QMainWindow):
     """Hauptfenster des Proxy Generators."""
 
@@ -66,7 +184,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._vm = viewmodel  # set later via set_viewmodel if None
         self._settings = QSettings("proxy-generator", "ProxyGenerator")
-        self.setMinimumSize(1000, 650)
+
+        # Settings-Werte (aus QSettings geladen, via SettingsDialog aenderbar)
+        self._debayer_quality: str = "Half"
+        self._hw_accel: str = "none"
+        self._parallel_jobs: int = 1
+
+        self.setMinimumSize(1000, 600)
         self.setAcceptDrops(True)
 
         self._build_toolbar()
@@ -125,6 +249,12 @@ class MainWindow(QMainWindow):
             lambda: self._vm.clear_all() if self._vm else None)
         tb.addAction(self._act_clear_all)
 
+        tb.addSeparator()
+
+        self._act_settings = QAction("", self)
+        self._act_settings.triggered.connect(self._on_settings)
+        tb.addAction(self._act_settings)
+
     # -- central widget ---------------------------------------------------------
 
     def _build_central(self) -> None:
@@ -178,14 +308,11 @@ class MainWindow(QMainWindow):
         self._mode_group = QButtonGroup(self)
         self._rb_rewrap = QRadioButton("")
         self._rb_proxy = QRadioButton("")
-        self._rb_braw = QRadioButton("")
         self._mode_group.addButton(self._rb_rewrap, 0)
         self._mode_group.addButton(self._rb_proxy, 1)
-        self._mode_group.addButton(self._rb_braw, 2)
         self._rb_rewrap.setChecked(True)
         ml.addWidget(self._rb_rewrap)
         ml.addWidget(self._rb_proxy)
-        ml.addWidget(self._rb_braw)
         layout.addWidget(self._grp_mode)
 
         # -- Proxy settings (only visible in proxy mode) ------------------------
@@ -205,14 +332,7 @@ class MainWindow(QMainWindow):
             "H.264", "H.265", "AV1",
             "ProRes 422 Proxy", "ProRes 422 LT", "ProRes 422", "ProRes 422 HQ",
         ])
-        self._combo_codec.currentTextChanged.connect(self._on_codec_changed)
         pl.addWidget(self._combo_codec)
-
-        self._lbl_debayer = QLabel("")
-        pl.addWidget(self._lbl_debayer)
-        self._combo_debayer = QComboBox()
-        self._combo_debayer.addItems(["Full", "Half", "Quarter"])
-        pl.addWidget(self._combo_debayer)
 
         layout.addWidget(self._grp_proxy)
         self._grp_proxy.setVisible(False)
@@ -237,38 +357,6 @@ class MainWindow(QMainWindow):
         self._chk_skip_existing = QCheckBox("")
         nl.addWidget(self._chk_skip_existing)
         layout.addWidget(self._grp_naming)
-
-        # -- Hardware encoding --------------------------------------------------
-        self._grp_hw = QGroupBox("")
-        hl = QVBoxLayout(self._grp_hw)
-        self._combo_hw = QComboBox()
-        self._combo_hw.addItems(["Keins / None", "NVENC (Nvidia)", "VAAPI (AMD/Intel)"])
-        hl.addWidget(self._combo_hw)
-        layout.addWidget(self._grp_hw)
-
-        # -- Parallel jobs ------------------------------------------------------
-        self._grp_par = QGroupBox("")
-        prl = QVBoxLayout(self._grp_par)
-        cpu_count = os.cpu_count() or 8
-        par_row = QHBoxLayout()
-        self._spin_parallel = QSpinBox()
-        self._spin_parallel.setRange(1, cpu_count)
-        self._spin_parallel.setValue(1)
-        self._spin_parallel.valueChanged.connect(self._on_parallel_changed)
-        par_row.addWidget(self._spin_parallel)
-        par_row.addWidget(QLabel(f"/ {cpu_count}"))
-        par_row.addStretch()
-        prl.addLayout(par_row)
-        layout.addWidget(self._grp_par)
-
-        # -- Language -----------------------------------------------------------
-        self._grp_lang = QGroupBox("")
-        ll = QVBoxLayout(self._grp_lang)
-        self._combo_lang = QComboBox()
-        self._combo_lang.addItems(["Deutsch", "English"])
-        self._combo_lang.currentIndexChanged.connect(self._on_language_changed)
-        ll.addWidget(self._combo_lang)
-        layout.addWidget(self._grp_lang)
 
         layout.addStretch()
         return container
@@ -295,6 +383,7 @@ class MainWindow(QMainWindow):
         self._act_cancel_all.setText(tr("toolbar.cancel_all"))
         self._act_clear.setText(tr("toolbar.clear_done"))
         self._act_clear_all.setText(tr("toolbar.clear_all"))
+        self._act_settings.setText(tr("toolbar.settings"))
 
         # Table headers
         self._table.setHorizontalHeaderLabels([
@@ -313,11 +402,9 @@ class MainWindow(QMainWindow):
         self._grp_mode.setTitle(tr("grp.mode"))
         self._rb_rewrap.setText(tr("rb.rewrap"))
         self._rb_proxy.setText(tr("rb.proxy"))
-        self._rb_braw.setText(tr("rb.braw"))
         self._grp_proxy.setTitle(tr("grp.proxy"))
         self._lbl_resolution.setText(tr("lbl.resolution"))
         self._lbl_codec.setText(tr("lbl.codec"))
-        self._lbl_debayer.setText(tr("lbl.debayer"))
         self._grp_naming.setTitle(tr("grp.naming"))
         self._lbl_suffix.setText(tr("lbl.suffix"))
         self._edit_suffix.setPlaceholderText(tr("placeholder.suffix"))
@@ -325,12 +412,6 @@ class MainWindow(QMainWindow):
         self._edit_subfolder.setPlaceholderText(tr("placeholder.subfolder"))
         self._btn_subfolder.setText(tr("btn.browse"))
         self._chk_skip_existing.setText(tr("chk.skip_existing"))
-        self._grp_hw.setTitle(tr("grp.hw"))
-        self._grp_par.setTitle(tr("grp.parallel"))
-        self._grp_lang.setTitle(tr("grp.lang"))
-
-        # ProRes tooltip (might currently be set)
-        self._on_codec_changed(self._combo_codec.currentText())
 
         # Refresh table content (status/mode columns)
         if self._vm is not None:
@@ -385,21 +466,14 @@ class MainWindow(QMainWindow):
             "ProRes 422 Proxy": "prores_proxy", "ProRes 422 LT": "prores_lt",
             "ProRes 422": "prores_422", "ProRes 422 HQ": "prores_hq",
         }
-        hw_map = {
-            "Keins / None": "none",
-            "NVENC (Nvidia)": "nvenc",
-            "VAAPI (AMD/Intel)": "vaapi",
-        }
-        debayer_map = {"Full": "full", "Half": "half", "Quarter": "quarter"}
-        is_braw = self._rb_braw.isChecked()
         return JobOptions(
-            proxy_resolution=None if is_braw else resolution_map.get(self._combo_resolution.currentText()),
+            proxy_resolution=resolution_map.get(self._combo_resolution.currentText()),
             proxy_codec=codec_map.get(self._combo_codec.currentText(), "h264"),
-            hw_accel=hw_map.get(self._combo_hw.currentText(), "none"),
+            hw_accel=self._hw_accel,
             output_suffix=self._edit_suffix.text(),
             output_subfolder=self._edit_subfolder.text().strip(),
             skip_if_exists=self._chk_skip_existing.isChecked(),
-            debayer_quality=debayer_map.get(self._combo_debayer.currentText(), "full"),
+            debayer_quality=self._debayer_quality,
         )
 
     def _on_start_pause_resume(self) -> None:
@@ -409,13 +483,7 @@ class MainWindow(QMainWindow):
             if not self._vm.jobs:
                 QMessageBox.information(self, tr("dlg.queue_empty_title"), tr("dlg.queue_empty_msg"))
                 return
-            if self._rb_braw.isChecked():
-                mode = JobMode.BRAW_PROXY
-            elif self._rb_proxy.isChecked():
-                mode = JobMode.PROXY
-            else:
-                mode = JobMode.REWRAP
-            self._vm.start_all(mode, self._gather_options())
+            self._vm.start_all()
             self._set_start_state("running")
             self._statusbar.showMessage(tr("statusbar.started"), 3000)
         elif self._start_state == "running":
@@ -445,30 +513,116 @@ class MainWindow(QMainWindow):
             self._output_dir_edit.setText(folder)
 
     def _on_browse_subfolder(self) -> None:
-        # Dialog startet im aktuellen Ausgabe-Ordner (falls vorhanden)
         start = self._output_dir_edit.text().strip() or str(Path.home())
         folder = QFileDialog.getExistingDirectory(self, tr("fdlg.output_folder"), start)
         if folder:
             self._edit_subfolder.setText(folder)
 
-    def _on_codec_changed(self, text: str) -> None:
-        is_prores = text.startswith("ProRes")
-        self._combo_hw.setEnabled(not is_prores)
-        self._combo_hw.setToolTip(tr("tooltip.prores_cpu") if is_prores else "")
-
     def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
             if button_id == -1:
-                show_proxy = self._rb_proxy.isChecked() or self._rb_braw.isChecked()
-                is_braw = self._rb_braw.isChecked()
+                show_proxy = self._rb_proxy.isChecked()
             else:
-                show_proxy = button_id in (1, 2)
-                is_braw = button_id == 2
+                show_proxy = button_id == 1
             self._grp_proxy.setVisible(show_proxy)
-            self._lbl_debayer.setVisible(is_braw)
-            self._combo_debayer.setVisible(is_braw)
-            self._lbl_resolution.setEnabled(not is_braw)
-            self._combo_resolution.setEnabled(not is_braw)
+
+    def _on_settings(self) -> None:
+        """Öffnet den Einstellungs-Dialog."""
+        dlg = SettingsDialog(self._settings, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        old_lang = get_language()
+
+        # Werte übernehmen
+        self._debayer_quality = dlg.debayer_quality
+        self._hw_accel = dlg.hw_accel
+        self._parallel_jobs = dlg.parallel_jobs
+
+        # Settings speichern
+        self._settings.setValue("debayer_quality", self._debayer_quality)
+        self._settings.setValue("hw_accel", dlg._combo_hw.currentText())
+        self._settings.setValue("parallel_jobs", self._parallel_jobs)
+        self._settings.setValue("language", dlg.language)
+
+        # Qt-Stil anwenden (Neustart für "System Standard" erforderlich)
+        self._settings.setValue("qt_style", dlg.qt_style)
+        if dlg.qt_style:
+            style = QStyleFactory.create(dlg.qt_style)
+            if style:
+                QApplication.setStyle(style)
+        else:
+            QMessageBox.information(
+                self,
+                tr("dlg.settings_title"),
+                tr("msg.restart_for_style"),
+            )
+
+        # Parallele Jobs ans Backend melden
+        if self._vm is not None:
+            self._vm.set_max_parallel(self._parallel_jobs)
+
+        # Sprache aktualisieren
+        if dlg.language != old_lang:
+            set_language(dlg.language)
+            self.retranslate_ui()
+
+    # -- submit jobs (gather options from settings panel) -----------------------
+
+    def _submit_jobs(self, paths: list[str]) -> None:
+        if self._vm is None:
+            return
+
+        output_dir = self._output_dir_edit.text().strip()
+        if not output_dir:
+            QMessageBox.warning(self, tr("dlg.output_title"), tr("dlg.output_choose"))
+            return
+        if not os.path.isdir(output_dir):
+            QMessageBox.warning(self, tr("dlg.output_title"),
+                                tr("dlg.output_not_found") + output_dir)
+            return
+        if not os.access(output_dir, os.W_OK):
+            QMessageBox.warning(self, tr("dlg.output_title"),
+                                tr("dlg.output_no_write") + output_dir)
+            return
+
+        selected_mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
+        options = self._gather_options()
+
+        braw_paths = [p for p in paths if Path(p).suffix.lower() == ".braw"]
+        other_paths = [p for p in paths if Path(p).suffix.lower() != ".braw"]
+
+        # BRAW im ReWrap-Modus: warnen und überspringen
+        if braw_paths and selected_mode == JobMode.REWRAP:
+            QMessageBox.warning(
+                self,
+                tr("dlg.braw_rewrap_title"),
+                tr("dlg.braw_rewrap_msg").format(n=len(braw_paths)),
+            )
+            braw_paths = []
+
+        count_before = len(self._vm.jobs)
+
+        # BRAW-Dateien als BrawProxy mit Debayer aus Einstellungen
+        if braw_paths:
+            braw_options = self._gather_options()
+            braw_options.proxy_resolution = None  # BRAW nutzt keinen FFmpeg-Scale
+            self._vm.add_files(braw_paths, output_dir, JobMode.BRAW_PROXY, braw_options)
+
+        # Nicht-BRAW-Dateien mit gewähltem Modus
+        if other_paths:
+            self._vm.add_files(other_paths, output_dir, selected_mode, options)
+
+        count_after = len(self._vm.jobs)
+        added = count_after - count_before
+        total = len(braw_paths) + len(other_paths)
+        if added == 0 and total > 0:
+            QMessageBox.warning(self, tr("dlg.error_title"), tr("dlg.no_jobs_added"))
+        elif added < total:
+            self._statusbar.showMessage(
+                tr("statusbar.added").format(added=added, total=total), 5000)
+
+    # -- table management -------------------------------------------------------
 
     def _selected_job_ids(self) -> list[str]:
         """Gibt die Job-IDs aller selektierten Zeilen zurück."""
@@ -495,13 +649,7 @@ class MainWindow(QMainWindow):
         job_ids = self._selected_job_ids()
         if not job_ids:
             return
-        if self._rb_braw.isChecked():
-            mode = JobMode.BRAW_PROXY
-        elif self._rb_proxy.isChecked():
-            mode = JobMode.PROXY
-        else:
-            mode = JobMode.REWRAP
-        self._vm.start_selected(job_ids, mode, self._gather_options())
+        self._vm.start_selected(job_ids)
         if self._start_state == "idle":
             self._set_start_state("running")
 
@@ -510,16 +658,6 @@ class MainWindow(QMainWindow):
             return
         self._vm.cancel_all()
         self._set_start_state("idle")
-
-    def _on_parallel_changed(self, value: int) -> None:
-        if self._vm is not None:
-            self._vm.set_max_parallel(value)
-
-    def _on_language_changed(self, index: int) -> None:
-        lang = "de" if index == 0 else "en"
-        set_language(lang)
-        self._settings.setValue("language", lang)
-        self.retranslate_ui()
 
     # -- context menu -----------------------------------------------------------
 
@@ -532,7 +670,6 @@ class MainWindow(QMainWindow):
             return
         job = jobs[row]
 
-        # Alle selektierten Zeilen für Mehrfach-Aktionen
         selected_ids = self._selected_job_ids()
         if job.id not in selected_ids:
             selected_ids = [job.id]
@@ -559,13 +696,7 @@ class MainWindow(QMainWindow):
         if action is None or self._vm is None:
             return
         if action == act_start:
-            if self._rb_braw.isChecked():
-                mode = JobMode.BRAW_PROXY
-            elif self._rb_proxy.isChecked():
-                mode = JobMode.PROXY
-            else:
-                mode = JobMode.REWRAP
-            self._vm.start_selected(startable, mode, self._gather_options())
+            self._vm.start_selected(startable)
             if self._start_state == "idle":
                 self._set_start_state("running")
         elif action == act_reset:
@@ -574,45 +705,6 @@ class MainWindow(QMainWindow):
             self._vm.cancel_job(job.id)
         elif action == act_remove:
             self._vm.remove_job(job.id)
-
-    # -- submit jobs (gather options from settings panel) -----------------------
-
-    def _submit_jobs(self, paths: list[str]) -> None:
-        if self._vm is None:
-            return
-
-        output_dir = self._output_dir_edit.text().strip()
-        if not output_dir:
-            QMessageBox.warning(self, tr("dlg.output_title"), tr("dlg.output_choose"))
-            return
-        if not os.path.isdir(output_dir):
-            QMessageBox.warning(self, tr("dlg.output_title"),
-                                tr("dlg.output_not_found") + output_dir)
-            return
-        if not os.access(output_dir, os.W_OK):
-            QMessageBox.warning(self, tr("dlg.output_title"),
-                                tr("dlg.output_no_write") + output_dir)
-            return
-
-        if self._rb_braw.isChecked():
-            mode = JobMode.BRAW_PROXY
-        elif self._rb_proxy.isChecked():
-            mode = JobMode.PROXY
-        else:
-            mode = JobMode.REWRAP
-        options = self._gather_options()
-
-        count_before = len(self._vm.jobs)
-        self._vm.add_files(paths, output_dir, mode, options)
-        count_after = len(self._vm.jobs)
-        added = count_after - count_before
-        if added == 0 and paths:
-            QMessageBox.warning(self, tr("dlg.error_title"), tr("dlg.no_jobs_added"))
-        elif added < len(paths):
-            self._statusbar.showMessage(
-                tr("statusbar.added").format(added=added, total=len(paths)), 5000)
-
-    # -- table management -------------------------------------------------------
 
     def _rebuild_table(self) -> None:
         """Rebuild the entire table from the viewmodel's job list."""
@@ -658,7 +750,6 @@ class MainWindow(QMainWindow):
             status_item.setForeground(Qt.GlobalColor.gray)
         self._table.setItem(row, COL_STATUS, status_item)
 
-        # Progress bar
         bar = self._table.cellWidget(row, COL_PROGRESS)
         if not isinstance(bar, QProgressBar):
             bar = QProgressBar()
@@ -683,7 +774,6 @@ class MainWindow(QMainWindow):
         done = sum(1 for j in jobs if j.status == JobStatus.DONE)
         self._status_label.setText(
             tr("statusbar.summary").format(total=total, running=running, done=done))
-        # Button zurücksetzen wenn keine Jobs mehr laufen oder warten
         active = any(j.status in (JobStatus.QUEUED, JobStatus.RUNNING) for j in jobs)
         if self._start_state in ("running", "paused") and not active:
             self._set_start_state("idle")
@@ -695,9 +785,7 @@ class MainWindow(QMainWindow):
         self._output_dir_edit.setText(
             self._settings.value("output_dir", str(Path.home())))
         mode = self._settings.value("mode", "rewrap")
-        if mode == "braw_proxy":
-            self._rb_braw.setChecked(True)
-        elif mode == "proxy":
+        if mode == "proxy":
             self._rb_proxy.setChecked(True)
         else:
             self._rb_rewrap.setChecked(True)
@@ -710,52 +798,40 @@ class MainWindow(QMainWindow):
         idx = self._combo_codec.findText(codec)
         if idx >= 0:
             self._combo_codec.setCurrentIndex(idx)
-        debayer = self._settings.value("debayer_quality", "Full")
-        idx = self._combo_debayer.findText(debayer)
-        if idx >= 0:
-            self._combo_debayer.setCurrentIndex(idx)
-        hw = self._settings.value("hw_accel", "Keins / None")
-        idx = self._combo_hw.findText(hw)
-        if idx >= 0:
-            self._combo_hw.setCurrentIndex(idx)
-        try:
-            parallel = int(self._settings.value("parallel_jobs", 1))
-        except (ValueError, TypeError):
-            parallel = 1
-        self._spin_parallel.setValue(parallel)
         self._edit_suffix.setText(self._settings.value("output_suffix", ""))
         self._edit_subfolder.setText(self._settings.value("output_subfolder", ""))
         self._chk_skip_existing.setChecked(
             self._settings.value("skip_if_exists", False, type=bool))
-        # Language (must be loaded before retranslate_ui is called)
+
+        # Settings aus Dialog
+        self._debayer_quality = str(self._settings.value("debayer_quality", "Half"))
+        hw_display = str(self._settings.value("hw_accel", "Keins / None"))
+        hw_map = {"Keins / None": "none", "NVENC (Nvidia)": "nvenc", "VAAPI (AMD/Intel)": "vaapi"}
+        self._hw_accel = hw_map.get(hw_display, "none")
+        try:
+            self._parallel_jobs = int(self._settings.value("parallel_jobs", 1))
+        except (ValueError, TypeError):
+            self._parallel_jobs = 1
+
+        # Sprache
         lang = self._settings.value("language", "de")
         set_language(lang)
-        lang_idx = 0 if lang == "de" else 1
-        self._combo_lang.blockSignals(True)
-        self._combo_lang.setCurrentIndex(lang_idx)
-        self._combo_lang.blockSignals(False)
+
+        # Qt-Stil wird beim App-Start in main.py gesetzt (vor Widget-Erstellung)
 
     def _save_settings(self) -> None:
         self._settings.setValue("output_dir", self._output_dir_edit.text())
-        if self._rb_braw.isChecked():
-            mode = "braw_proxy"
-        elif self._rb_proxy.isChecked():
-            mode = "proxy"
-        else:
-            mode = "rewrap"
-        self._settings.setValue("mode", mode)
-        self._settings.setValue("proxy_resolution",
-                                self._combo_resolution.currentText())
-        self._settings.setValue("proxy_codec",
-                                self._combo_codec.currentText())
-        self._settings.setValue("debayer_quality",
-                                self._combo_debayer.currentText())
-        self._settings.setValue("hw_accel", self._combo_hw.currentText())
-        self._settings.setValue("parallel_jobs", self._spin_parallel.value())
+        self._settings.setValue("mode", "proxy" if self._rb_proxy.isChecked() else "rewrap")
+        self._settings.setValue("proxy_resolution", self._combo_resolution.currentText())
+        self._settings.setValue("proxy_codec", self._combo_codec.currentText())
         self._settings.setValue("output_suffix", self._edit_suffix.text())
         self._settings.setValue("output_subfolder", self._edit_subfolder.text().strip())
         self._settings.setValue("skip_if_exists", self._chk_skip_existing.isChecked())
         self._settings.setValue("language", get_language())
+        # Settings aus Dialog (werden bereits in _on_settings gespeichert,
+        # hier zur Sicherheit nochmals)
+        self._settings.setValue("debayer_quality", self._debayer_quality)
+        self._settings.setValue("parallel_jobs", self._parallel_jobs)
 
     # -- drag & drop ------------------------------------------------------------
 
