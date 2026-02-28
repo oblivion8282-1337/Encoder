@@ -238,9 +238,10 @@ fn push_nvenc(args: &mut Vec<String>, codec: &str, qp: &str, resolution: Option<
             args.push("-vf".to_string());
             args.push(format!("format=nv12,hwupload,scale_cuda={res}"));
         } else {
-            // Kein Scale, aber Format-Konvertierung fuer exotische Pixelformate.
+            // Kein Scale: format=nv12 konvertiert RGB/YUV → nv12,
+            // hwupload laedt die Frames in den CUDA-Speicher fuer NVENC.
             args.push("-vf".to_string());
-            args.push("format=nv12".to_string());
+            args.push("format=nv12,hwupload".to_string());
         }
     }
 }
