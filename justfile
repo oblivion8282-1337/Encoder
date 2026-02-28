@@ -54,3 +54,17 @@ flatpak-run:
 # Flatpak-Buildartefakte aufräumen
 flatpak-clean:
     rm -rf flatpak/build-dir flatpak/.flatpak-builder
+
+# ── AppImage ──────────────────────────────────────────────────────────────────
+
+# AppImage bauen (Voraussetzung: sudo pacman -S cmake patchelf librsvg)
+appimage:
+    bash appimage/build.sh
+
+# AppImage starten (nach dem Bauen)
+appimage-run:
+    ./ProxyGenerator-x86_64.AppImage
+
+# AppImage-Buildartefakte aufräumen
+appimage-clean:
+    rm -rf appimage/AppDir appimage/.cache ProxyGenerator-x86_64.AppImage

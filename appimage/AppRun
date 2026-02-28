@@ -1,0 +1,12 @@
+#!/bin/bash
+# AppImage-Launcher für Proxy Generator.
+# Wird von der AppImage-Runtime als Einstiegspunkt ausgeführt.
+
+APPDIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+# Native Binaries (Rust-Backend + C++-Bridges)
+export PROXY_GENERATOR_BACKEND="$APPDIR/usr/bin/proxy-generator-backend"
+export BRAW_BRIDGE_PATH="$APPDIR/usr/bin/braw-bridge"
+export R3D_BRIDGE_PATH="$APPDIR/usr/bin/r3d-bridge"
+
+exec "$APPDIR/usr/bin/python3.12" -m proxy_generator "$@"
