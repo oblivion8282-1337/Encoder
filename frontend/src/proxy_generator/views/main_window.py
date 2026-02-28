@@ -391,8 +391,9 @@ class MainWindow(QMainWindow):
             "VAAPI (AMD/Intel)": "vaapi",
         }
         debayer_map = {"Full": "full", "Half": "half", "Quarter": "quarter"}
+        is_braw = self._rb_braw.isChecked()
         return JobOptions(
-            proxy_resolution=resolution_map.get(self._combo_resolution.currentText()),
+            proxy_resolution=None if is_braw else resolution_map.get(self._combo_resolution.currentText()),
             proxy_codec=codec_map.get(self._combo_codec.currentText(), "h264"),
             hw_accel=hw_map.get(self._combo_hw.currentText(), "none"),
             output_suffix=self._edit_suffix.text(),
@@ -466,6 +467,8 @@ class MainWindow(QMainWindow):
             self._grp_proxy.setVisible(show_proxy)
             self._lbl_debayer.setVisible(is_braw)
             self._combo_debayer.setVisible(is_braw)
+            self._lbl_resolution.setEnabled(not is_braw)
+            self._combo_resolution.setEnabled(not is_braw)
 
     def _selected_job_ids(self) -> list[str]:
         """Gibt die Job-IDs aller selektierten Zeilen zurück."""

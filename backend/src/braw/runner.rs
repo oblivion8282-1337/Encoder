@@ -104,12 +104,35 @@ fn parse_metadata_json(json_str: &str) -> Result<BrawMetadata> {
     })
 }
 
+/// Extrahiert Audio aus einer BRAW-Datei als temporaere WAV-Datei.
+/// Gibt den Pfad zur WAV-Datei zurueck, oder None wenn kein Audio vorhanden.
+async fn extract_braw_audio(bridge: &Path, input_path: &Path, job_id: &str) -> Option<PathBuf> {
+    let wav_path = std::env::temp_dir().join(format!("proxy-gen-audio-{}.wav", job_id));
+    let status = Command::new(bridge)
+        .arg("--input")
+        .arg(input_path.as_os_str())
+        .arg("--extract-audio")
+        .arg(&wav_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .ok()?;
+    if status.success() && wav_path.exists() {
+        Some(wav_path)
+    } else {
+        None
+    }
+}
+
 /// Baut FFmpeg-Argumente fuer BRAW-Proxy-Encoding.
-/// Input ist rawvideo rgb24 von stdin (pipe:0), kein HW-Accel fuer Decode.
+/// Input ist rawvideo rgb24 von stdin (pipe:0).
+/// Optional: audio_path fuer einen zweiten WAV-Input.
 fn build_braw_ffmpeg_args(
     output_path: &Path,
     options: &JobOptions,
     meta: &BrawMetadata,
+    audio_path: Option<&Path>,
 ) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -120,24 +143,46 @@ fn build_braw_ffmpeg_args(
     args.push("-loglevel".to_string());
     args.push("warning".to_string());
 
-    // Raw-Video Input von stdin
+    // Tatsaechliche Frame-Dimensionen nach Debayer berechnen.
+    // probe_braw_metadata liefert die volle Sensor-Aufloesung; braw-bridge
+    // gibt aber bei half/quarter entsprechend kleinere Frames aus.
+    let (frame_width, frame_height) = match options.debayer_quality.as_str() {
+        "half"    => (meta.width / 2, meta.height / 2),
+        "quarter" => (meta.width / 4, meta.height / 4),
+        _         => (meta.width, meta.height),
+    };
+
+    // Input 0: Raw-Video von stdin
     args.push("-f".to_string());
     args.push("rawvideo".to_string());
     args.push("-pix_fmt".to_string());
     args.push("rgb24".to_string());
     args.push("-s".to_string());
-    args.push(format!("{}x{}", meta.width, meta.height));
+    args.push(format!("{}x{}", frame_width, frame_height));
     args.push("-r".to_string());
     args.push(format!("{}/{}", meta.fps_num, meta.fps_den));
     args.push("-i".to_string());
     args.push("pipe:0".to_string());
 
-    // Proxy-Codec-Argumente (gleiche Logik wie normaler Proxy, aber kein HW-Accel fuer Input)
+    // Input 1: Audio-WAV (optional)
+    if let Some(wav) = audio_path {
+        args.push("-i".to_string());
+        args.push(wav.to_string_lossy().to_string());
+    }
+
+    // Stream-Mapping (nur explizit wenn Audio vorhanden, sonst auto)
+    if audio_path.is_some() {
+        args.push("-map".to_string());
+        args.push("0:v:0".to_string());
+        args.push("-map".to_string());
+        args.push("1:a".to_string());
+    }
+
+    // Video-Codec
     let resolution = options
         .proxy_resolution
         .as_deref()
         .map(|r| r.replace('x', ":"));
-    // BRAW: kein HW-Accel (rawvideo von Pipe), kein NVDEC
     push_proxy_codec_args(
         &mut args,
         &options.proxy_codec,
@@ -146,7 +191,11 @@ fn build_braw_ffmpeg_args(
         false,
     );
 
-    // Audio: kein Audio bei BRAW-Proxies (BRAW enthaelt kein Audio)
+    // Audio-Codec (PCM, nur wenn Audio vorhanden)
+    if audio_path.is_some() {
+        args.push("-c:a".to_string());
+        args.push("pcm_s16le".to_string());
+    }
 
     // Timecode als Container-Metadaten
     if !meta.timecode.is_empty() {
@@ -162,8 +211,11 @@ fn build_braw_ffmpeg_args(
 
 /// Startet braw-bridge + FFmpeg Pipeline und sendet Events ueber den Channel.
 ///
-/// braw-bridge stdout (rawvideo rgb24) wird direkt an FFmpeg stdin gepiped.
-/// braw-bridge stderr liefert NDJSON progress-Events.
+/// Ablauf:
+/// 1. Audio-Extraktion (braw-bridge --extract-audio) in temp-WAV
+/// 2. braw-bridge stdout (rawvideo rgb24) → FFmpeg stdin
+/// 3. FFmpeg muxed Video + Audio (falls vorhanden) in Proxy
+/// 4. Temp-WAV wird nach Abschluss geloescht
 pub async fn run_braw_job(
     job_id: String,
     input_path: PathBuf,
@@ -175,9 +227,13 @@ pub async fn run_braw_job(
     pid_slot: Arc<AtomicU32>,
 ) -> Result<()> {
     let bridge = find_braw_bridge();
-    let ffmpeg_args = build_braw_ffmpeg_args(&output_path, options, &meta);
 
-    // braw-bridge starten
+    // Schritt 1: Audio extrahieren (blockierend, aber schnell)
+    let audio_wav = extract_braw_audio(&bridge, &input_path, &job_id).await;
+
+    let ffmpeg_args = build_braw_ffmpeg_args(&output_path, options, &meta, audio_wav.as_deref());
+
+    // Schritt 2: braw-bridge starten
     let mut bridge_child = Command::new(&bridge)
         .arg("--input")
         .arg(input_path.as_os_str())
@@ -205,6 +261,7 @@ pub async fn run_braw_job(
     let mut stderr_reader = BufReader::new(bridge_stderr).lines();
     let first_line = stderr_reader.next_line().await?;
     if first_line.is_none() {
+        cleanup_audio(&audio_wav);
         let _ = tx
             .send(FfmpegEvent::Error {
                 id: job_id,
@@ -214,7 +271,7 @@ pub async fn run_braw_job(
         return Ok(());
     }
 
-    // FFmpeg starten mit braw-bridge stdout als stdin.
+    // Schritt 3: FFmpeg starten mit braw-bridge stdout als stdin.
     // tokio::ChildStdout → OwnedFd → std::process::Stdio
     let bridge_stdout_raw: std::process::Stdio = {
         let owned_fd = bridge_stdout.into_owned_fd()
@@ -243,6 +300,7 @@ pub async fn run_braw_job(
                 let _ = bridge_child.wait().await;
                 let _ = ffmpeg_child.wait().await;
                 pid_slot.store(0, Ordering::Release);
+                cleanup_audio(&audio_wav);
                 let _ = tx
                     .send(FfmpegEvent::Cancelled {
                         id: job_id.clone(),
@@ -279,6 +337,7 @@ pub async fn run_braw_job(
                         let bridge_status = bridge_child.wait().await?;
                         let ffmpeg_status = ffmpeg_child.wait().await?;
                         pid_slot.store(0, Ordering::Release);
+                        cleanup_audio(&audio_wav);
 
                         if !bridge_status.success() {
                             let _ = tx
@@ -314,6 +373,7 @@ pub async fn run_braw_job(
                         let _ = ffmpeg_child.kill().await;
                         let _ = ffmpeg_child.wait().await;
                         pid_slot.store(0, Ordering::Release);
+                        cleanup_audio(&audio_wav);
                         let _ = tx
                             .send(FfmpegEvent::Error {
                                 id: job_id.clone(),
@@ -325,5 +385,12 @@ pub async fn run_braw_job(
                 }
             }
         }
+    }
+}
+
+/// Loescht die temporaere Audio-WAV-Datei, falls vorhanden.
+fn cleanup_audio(audio_wav: &Option<PathBuf>) {
+    if let Some(path) = audio_wav {
+        let _ = std::fs::remove_file(path);
     }
 }
