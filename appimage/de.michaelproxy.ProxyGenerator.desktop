@@ -1,3 +1,4 @@
+#!/usr/bin/env xdg-open
 [Desktop Entry]
 Name=Proxy Generator
 Comment=Video proxy and re-wrapper for DaVinci Resolve

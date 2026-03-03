@@ -57,6 +57,7 @@ pub fn build_ffmpeg_args(
     mode: &JobMode,
     options: &JobOptions,
     nvenc_full_gpu: bool,
+    decodable_audio: &[usize],
 ) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -101,11 +102,21 @@ pub fn build_ffmpeg_args(
     args.push("-i".to_string());
     args.push(input_path.to_string_lossy().to_string());
 
-    // Mapping: erster Video-Stream, ALLE Audio-Streams (Sony FX 8-Kanal Mono)
+    // Mapping: erster Video-Stream + dekodierbare Audio-Streams.
+    // decodable_audio ist leer wenn der Probe fehlschlug → Fallback auf 0:a.
+    // Sonst werden nur bekannte, dekodierbare Streams explizit gemappt, um
+    // Streams mit unbekanntem Codec (z.B. apac / Apple Positional Audio) zu überspringen.
     args.push("-map".to_string());
     args.push("0:v:0".to_string());
-    args.push("-map".to_string());
-    args.push("0:a".to_string());
+    if decodable_audio.is_empty() {
+        args.push("-map".to_string());
+        args.push("0:a".to_string());
+    } else {
+        for idx in decodable_audio {
+            args.push("-map".to_string());
+            args.push(format!("0:a:{idx}"));
+        }
+    }
 
     // Globale Metadaten uebernehmen (Timecode etc. auf Container-Ebene)
     // Hinweis: -map 0:d? entfernt – Sony FX MXF hat smpte_436m_anc (nicht MOV-kompatibel)

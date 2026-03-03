@@ -242,6 +242,7 @@ pub async fn run_queue(
                 let r3d_meta:  Option<r3d_runner::R3dMetadata>;
                 let total_duration_us: i64;
                 let nvenc_full_gpu: bool;
+                let decodable_audio: Vec<usize>;
 
                 if is_braw {
                     match braw_runner::probe_braw_metadata(&input_path_clone).await {
@@ -253,6 +254,7 @@ pub async fn run_queue(
                                 0
                             };
                             nvenc_full_gpu = false;
+                            decodable_audio = Vec::new();
                             braw_meta = Some(meta);
                             r3d_meta  = None;
                         }
@@ -278,6 +280,7 @@ pub async fn run_queue(
                                 0
                             };
                             nvenc_full_gpu = false;
+                            decodable_audio = Vec::new();
                             r3d_meta  = Some(meta);
                             braw_meta = None;
                         }
@@ -296,10 +299,10 @@ pub async fn run_queue(
                 } else {
                     braw_meta = None;
                     r3d_meta  = None;
-                    // Dauer und Pixel-Format der Quelldatei ermitteln (parallel via ffprobe).
+                    // Dauer, Pixel-Format und dekodierbare Audio-Streams ermitteln (parallel via ffprobe).
                     let needs_pix_fmt = matches!(job.mode, JobMode::Proxy)
                         && job.options.hw_accel == "nvenc";
-                    let (duration_result, pix_fmt) = tokio::join!(
+                    let (duration_result, pix_fmt, audio_probe) = tokio::join!(
                         probe_duration(&input_path_clone),
                         async {
                             if needs_pix_fmt {
@@ -308,7 +311,9 @@ pub async fn run_queue(
                                 String::new()
                             }
                         },
+                        probe_audio_streams(&input_path_clone),
                     );
+                    decodable_audio = audio_probe;
                     total_duration_us = match duration_result {
                         Ok(d) if d > 0 => d,
                         Ok(_) | Err(_) => {
@@ -350,6 +355,7 @@ pub async fn run_queue(
                         &job.mode,
                         &job.options,
                         nvenc_full_gpu,
+                        &decodable_audio,
                     )
                 };
 
@@ -698,4 +704,51 @@ async fn probe_duration(path: &Path) -> Result<i64> {
         .parse()
         .map_err(|e| anyhow::anyhow!("ffprobe Dauer nicht parsebar '{}': {e}", stdout.trim()))?;
     Ok((seconds * 1_000_000.0) as i64)
+}
+
+/// Ermittelt die Indizes der dekodierbaren Audio-Streams einer Datei via ffprobe.
+///
+/// Streams mit codec_name "none" (z.B. apac / Apple Positional Audio Codec, iPhone 14+)
+/// haben keinen FFmpeg-Decoder und werden herausgefiltert.
+/// Gibt einen leeren Vec zurueck bei Fehler → Aufrufer nutzt dann Fallback -map 0:a.
+async fn probe_audio_streams(path: &Path) -> Vec<usize> {
+    let Ok(output) = tokio::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_streams",
+            "-select_streams",
+            "a",
+        ])
+        .arg(path.as_os_str())
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let Ok(text) = String::from_utf8(output.stdout) else {
+        return Vec::new();
+    };
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+
+    let Some(streams) = json["streams"].as_array() else {
+        return Vec::new();
+    };
+
+    streams
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s["codec_name"].as_str().map(|c| c != "none").unwrap_or(false))
+        .map(|(i, _)| i)
+        .collect()
 }
