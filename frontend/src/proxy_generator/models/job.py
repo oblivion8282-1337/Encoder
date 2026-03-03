@@ -32,6 +32,8 @@ class JobOptions:
     skip_if_exists: bool = False
     debayer_quality: str = "full"
     r3d_debayer_quality: str = "half"
+    mirror_subpath: str = ""
+    adjacent: bool = False
 
 
 @dataclass

@@ -110,6 +110,8 @@ class IpcClient:
             "skip_if_exists": job.options.skip_if_exists,
             "debayer_quality": job.options.debayer_quality,
             "r3d_debayer_quality": job.options.r3d_debayer_quality,
+            "mirror_subpath": job.options.mirror_subpath,
+            "adjacent": job.options.adjacent,
         }
         if job.options.proxy_resolution is not None:
             options["proxy_resolution"] = job.options.proxy_resolution

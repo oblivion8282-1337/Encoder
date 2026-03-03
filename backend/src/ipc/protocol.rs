@@ -82,6 +82,15 @@ pub struct JobOptions {
     /// Debayer-Qualitaet fuer R3D: "premium" | "half" | "quarter" | "eighth"
     #[serde(default = "default_r3d_debayer_quality")]
     pub r3d_debayer_quality: String,
+
+    /// Relativer Unterordner-Pfad zum Spiegeln der Quellstruktur.
+    /// Wird vom Frontend berechnet, z.B. "Day1" oder "Kamera/A". Leer = kein Spiegeln.
+    #[serde(default)]
+    pub mirror_subpath: String,
+
+    /// Wenn true: Ausgabe neben der Quelldatei ablegen (output_dir wird ignoriert).
+    #[serde(default)]
+    pub adjacent: bool,
 }
 
 impl Default for JobOptions {
@@ -96,6 +105,8 @@ impl Default for JobOptions {
             skip_if_exists: false,
             debayer_quality: default_debayer_quality(),
             r3d_debayer_quality: default_r3d_debayer_quality(),
+            mirror_subpath: String::new(),
+            adjacent: false,
         }
     }
 }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -311,14 +312,32 @@ class MainWindow(QMainWindow):
 
         # -- Output directory ---------------------------------------------------
         self._grp_output = QGroupBox("")
-        gl = QHBoxLayout(self._grp_output)
+        gl = QVBoxLayout(self._grp_output)
+        # Modus-Auswahl: fixer Ordner vs. neben Originalen
+        output_mode_row = QHBoxLayout()
+        self._rb_outdir = QRadioButton("")
+        self._rb_adjacent = QRadioButton("")
+        self._output_mode_group = QButtonGroup(self)
+        self._output_mode_group.addButton(self._rb_outdir, 0)
+        self._output_mode_group.addButton(self._rb_adjacent, 1)
+        self._rb_outdir.setChecked(True)
+        output_mode_row.addWidget(self._rb_outdir)
+        output_mode_row.addWidget(self._rb_adjacent)
+        output_mode_row.addStretch()
+        gl.addLayout(output_mode_row)
+        # Ordner-Picker (wird bei "Neben Originalen" ausgeblendet)
+        self._output_folder_row = QWidget()
+        folder_row_layout = QHBoxLayout(self._output_folder_row)
+        folder_row_layout.setContentsMargins(0, 0, 0, 0)
         self._output_dir_edit = QLineEdit()
         self._output_dir_edit.setText(str(Path.home()))
-        gl.addWidget(self._output_dir_edit)
+        folder_row_layout.addWidget(self._output_dir_edit)
         self._btn_browse = QPushButton("")
         self._btn_browse.clicked.connect(self._on_browse_output)
-        gl.addWidget(self._btn_browse)
+        folder_row_layout.addWidget(self._btn_browse)
+        gl.addWidget(self._output_folder_row)
         layout.addWidget(self._grp_output)
+        self._output_mode_group.idToggled.connect(self._on_adjacent_toggled)
 
         # -- Mode ---------------------------------------------------------------
         self._grp_mode = QGroupBox("")
@@ -374,7 +393,26 @@ class MainWindow(QMainWindow):
         nl.addLayout(subfolder_row)
         self._chk_skip_existing = QCheckBox("")
         nl.addWidget(self._chk_skip_existing)
+        self._chk_mirror_structure = QCheckBox("")
+        nl.addWidget(self._chk_mirror_structure)
         layout.addWidget(self._grp_naming)
+
+        # -- Live-Pfadvorschau --------------------------------------------------
+        self._lbl_path_preview = QLabel("")
+        self._lbl_path_preview.setWordWrap(True)
+        self._lbl_path_preview.setStyleSheet("color: gray;")
+        font = self._lbl_path_preview.font()
+        font.setPointSize(max(font.pointSize() - 1, 7))
+        self._lbl_path_preview.setFont(font)
+        layout.addWidget(self._lbl_path_preview)
+
+        # Signale für Live-Vorschau
+        self._output_dir_edit.textChanged.connect(self._update_path_preview)
+        self._edit_suffix.textChanged.connect(self._update_path_preview)
+        self._edit_subfolder.textChanged.connect(self._update_path_preview)
+        self._combo_codec.currentIndexChanged.connect(self._update_path_preview)
+        self._mode_group.idToggled.connect(lambda _bid, _chk: self._update_path_preview())
+        self._chk_mirror_structure.stateChanged.connect(self._update_path_preview)
 
         layout.addStretch()
         return container
@@ -430,6 +468,10 @@ class MainWindow(QMainWindow):
         self._edit_subfolder.setPlaceholderText(tr("placeholder.subfolder"))
         self._btn_subfolder.setText(tr("btn.browse"))
         self._chk_skip_existing.setText(tr("chk.skip_existing"))
+        self._rb_outdir.setText(tr("rb.outdir"))
+        self._rb_adjacent.setText(tr("rb.adjacent"))
+        self._chk_mirror_structure.setText(tr("chk.mirror_structure"))
+        self._update_path_preview()
 
         # Refresh table content (status/mode columns)
         if self._vm is not None:
@@ -443,6 +485,7 @@ class MainWindow(QMainWindow):
             return
         self._vm.jobs_changed.connect(self._rebuild_table)
         self._vm.job_updated.connect(self._update_job_row)
+        self._vm.jobs_changed.connect(self._update_path_preview)
 
     # -- toolbar actions --------------------------------------------------------
 
@@ -493,6 +536,7 @@ class MainWindow(QMainWindow):
             skip_if_exists=self._chk_skip_existing.isChecked(),
             debayer_quality=self._debayer_quality,
             r3d_debayer_quality=self._r3d_debayer_quality,
+            adjacent=self._rb_adjacent.isChecked(),
         )
 
     def _on_start_pause_resume(self) -> None:
@@ -536,6 +580,108 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, tr("fdlg.output_folder"), start)
         if folder:
             self._edit_subfolder.setText(Path(folder).name)
+
+    def _on_adjacent_toggled(self, button_id: int, checked: bool) -> None:
+        if not checked:
+            return
+        self._output_folder_row.setVisible(button_id == 0)
+        self._update_path_preview()
+
+    def _compute_common_root(self, paths: list[str]) -> Optional[Path]:
+        """Gemeinsamen Elternordner aller Pfade ermitteln.
+
+        Gibt None zurück wenn alle Dateien im selben Ordner liegen
+        (kein Spiegeln nötig) oder bei Fehler.
+        """
+        if not paths:
+            return None
+        parents = [str(Path(p).parent) for p in paths]
+        if len(set(parents)) <= 1:
+            return None
+        try:
+            return Path(os.path.commonpath(parents))
+        except ValueError:
+            return None
+
+    def _split_by_mirror_subpath(
+        self, paths: list[str], mirror_root: Optional[Path]
+    ) -> dict[str, list[str]]:
+        """Teilt Pfade nach ihrem mirror_subpath auf.
+
+        Gibt {subpath: [pfade]} zurück. Bei mirror_root=None landen alle
+        Pfade unter dem Schlüssel "" (kein Spiegeln).
+        """
+        result: dict[str, list[str]] = {}
+        for p in paths:
+            if mirror_root is None:
+                key = ""
+            else:
+                try:
+                    rel = Path(p).parent.relative_to(mirror_root)
+                    key = str(rel) if str(rel) != "." else ""
+                except ValueError:
+                    key = ""
+            result.setdefault(key, []).append(p)
+        return result
+
+    def _get_mirror_subpath_for(self, input_path: str) -> str:
+        """Mirror-Subpath für eine gegebene Datei anhand der aktuellen Queue berechnen."""
+        if not self._chk_mirror_structure.isChecked():
+            return ""
+        if self._rb_adjacent.isChecked():
+            return ""
+        jobs = self._vm.jobs if self._vm else []
+        all_paths = [j.input_path for j in jobs] if jobs else [input_path]
+        common = self._compute_common_root(all_paths)
+        if common is None:
+            return ""
+        try:
+            rel = Path(input_path).parent.relative_to(common)
+            s = str(rel)
+            return "" if s == "." else s
+        except ValueError:
+            return ""
+
+    def _compute_preview_path(self, input_path: str) -> str:
+        """Repliziert die Rust Job::output_path()-Logik für die Live-Vorschau."""
+        p = Path(input_path)
+        stem = p.stem
+        suffix = self._edit_suffix.text()
+        codec_map = {
+            "H.264": "h264", "H.265": "h265", "AV1": "av1",
+            "ProRes 422 Proxy": "prores_proxy", "ProRes 422 LT": "prores_lt",
+            "ProRes 422": "prores_422", "ProRes 422 HQ": "prores_hq",
+        }
+        proxy_codec = codec_map.get(self._combo_codec.currentText(), "h264")
+        ext = "mp4" if proxy_codec == "av1" else "mov"
+        if self._rb_adjacent.isChecked():
+            base_dir = p.parent
+        else:
+            base_dir = Path(self._output_dir_edit.text().strip() or str(Path.home()))
+        mirror_subpath = self._get_mirror_subpath_for(input_path)
+        if mirror_subpath:
+            base_dir = base_dir / mirror_subpath
+        subfolder = self._edit_subfolder.text().strip()
+        if subfolder:
+            base_dir = base_dir / subfolder
+        return str(base_dir / f"{stem}{suffix}.{ext}")
+
+    def _update_path_preview(self) -> None:
+        """Live-Pfadvorschau unterhalb der Einstellungen aktualisieren."""
+        jobs = self._vm.jobs if self._vm else []
+        if jobs:
+            sample_input = jobs[0].input_path
+        else:
+            base = Path(self._output_dir_edit.text().strip() or str(Path.home()))
+            sample_input = str(base / tr("lbl.path_preview_example"))
+        try:
+            out = self._compute_preview_path(sample_input)
+        except Exception:
+            out = "—"
+        src_name = Path(sample_input).name
+        text = f"{src_name}  →  {out}"
+        self._lbl_path_preview.setText(text)
+        self._lbl_path_preview.setToolTip(text)
 
     def _on_mode_changed(self, button_id: int = -1, checked: bool = True) -> None:
         if checked:
@@ -594,18 +740,21 @@ class MainWindow(QMainWindow):
         if self._vm is None:
             return
 
+        adjacent_mode = self._rb_adjacent.isChecked()
         output_dir = self._output_dir_edit.text().strip()
-        if not output_dir:
-            QMessageBox.warning(self, tr("dlg.output_title"), tr("dlg.output_choose"))
-            return
-        if not os.path.isdir(output_dir):
-            QMessageBox.warning(self, tr("dlg.output_title"),
-                                tr("dlg.output_not_found") + output_dir)
-            return
-        if not os.access(output_dir, os.W_OK):
-            QMessageBox.warning(self, tr("dlg.output_title"),
-                                tr("dlg.output_no_write") + output_dir)
-            return
+
+        if not adjacent_mode:
+            if not output_dir:
+                QMessageBox.warning(self, tr("dlg.output_title"), tr("dlg.output_choose"))
+                return
+            if not os.path.isdir(output_dir):
+                QMessageBox.warning(self, tr("dlg.output_title"),
+                                    tr("dlg.output_not_found") + output_dir)
+                return
+            if not os.access(output_dir, os.W_OK):
+                QMessageBox.warning(self, tr("dlg.output_title"),
+                                    tr("dlg.output_no_write") + output_dir)
+                return
 
         selected_mode = JobMode.PROXY if self._rb_proxy.isChecked() else JobMode.REWRAP
         options = self._gather_options()
@@ -633,23 +782,32 @@ class MainWindow(QMainWindow):
             )
             r3d_paths = []
 
+        # Mirror-Struktur berechnen (nur wenn aktiviert und nicht adjacent)
+        all_new_paths = braw_paths + r3d_paths + other_paths
+        mirror_enabled = self._chk_mirror_structure.isChecked() and not adjacent_mode
+        mirror_root = self._compute_common_root(all_new_paths) if mirror_enabled else None
+
         count_before = len(self._vm.jobs)
 
         # BRAW-Dateien als BrawProxy mit Debayer aus Einstellungen
         if braw_paths:
-            braw_options = self._gather_options()
-            braw_options.proxy_resolution = None  # BRAW nutzt keinen FFmpeg-Scale
-            self._vm.add_files(braw_paths, output_dir, JobMode.BRAW_PROXY, braw_options)
+            braw_base = replace(options, proxy_resolution=None)
+            for subpath, group in self._split_by_mirror_subpath(braw_paths, mirror_root).items():
+                self._vm.add_files(group, output_dir, JobMode.BRAW_PROXY,
+                                   replace(braw_base, mirror_subpath=subpath))
 
         # R3D-Dateien als R3dProxy mit Debayer aus Einstellungen
         if r3d_paths:
-            r3d_options = self._gather_options()
-            r3d_options.proxy_resolution = None  # R3D nutzt keinen FFmpeg-Scale
-            self._vm.add_files(r3d_paths, output_dir, JobMode.R3D_PROXY, r3d_options)
+            r3d_base = replace(options, proxy_resolution=None)
+            for subpath, group in self._split_by_mirror_subpath(r3d_paths, mirror_root).items():
+                self._vm.add_files(group, output_dir, JobMode.R3D_PROXY,
+                                   replace(r3d_base, mirror_subpath=subpath))
 
         # Nicht-RAW-Dateien mit gewähltem Modus
         if other_paths:
-            self._vm.add_files(other_paths, output_dir, selected_mode, options)
+            for subpath, group in self._split_by_mirror_subpath(other_paths, mirror_root).items():
+                self._vm.add_files(group, output_dir, selected_mode,
+                                   replace(options, mirror_subpath=subpath))
 
         count_after = len(self._vm.jobs)
         added = count_after - count_before
@@ -841,6 +999,13 @@ class MainWindow(QMainWindow):
         self._edit_subfolder.setText(self._settings.value("output_subfolder", ""))
         self._chk_skip_existing.setChecked(
             self._settings.value("skip_if_exists", False, type=bool))
+        adjacent = self._settings.value("adjacent_mode", False, type=bool)
+        if adjacent:
+            self._rb_adjacent.setChecked(True)
+        else:
+            self._rb_outdir.setChecked(True)
+        self._chk_mirror_structure.setChecked(
+            self._settings.value("mirror_structure", False, type=bool))
 
         # Settings aus Dialog
         self._debayer_quality = str(self._settings.value("debayer_quality", "Half"))
@@ -867,6 +1032,8 @@ class MainWindow(QMainWindow):
         self._settings.setValue("output_suffix", self._edit_suffix.text())
         self._settings.setValue("output_subfolder", self._edit_subfolder.text().strip())
         self._settings.setValue("skip_if_exists", self._chk_skip_existing.isChecked())
+        self._settings.setValue("adjacent_mode", self._rb_adjacent.isChecked())
+        self._settings.setValue("mirror_structure", self._chk_mirror_structure.isChecked())
         self._settings.setValue("language", get_language())
         # Settings aus Dialog (werden bereits in _on_settings gespeichert,
         # hier zur Sicherheit nochmals)

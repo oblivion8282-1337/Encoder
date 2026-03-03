@@ -80,10 +80,28 @@ impl Job {
             }
         };
 
-        let output_dir = if self.options.output_subfolder.is_empty() {
-            self.output_dir.clone()
+        // Feature 3: adjacent mode – Ausgabe neben der Quelldatei
+        let base_dir = if self.options.adjacent {
+            self.input_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| self.output_dir.clone())
         } else {
-            self.output_dir.join(&self.options.output_subfolder)
+            self.output_dir.clone()
+        };
+
+        // Feature 2: mirror_subpath – gespiegelte Quellordner-Struktur
+        let base_dir = if self.options.mirror_subpath.is_empty() {
+            base_dir
+        } else {
+            base_dir.join(&self.options.mirror_subpath)
+        };
+
+        // Optionaler Unterordner
+        let output_dir = if self.options.output_subfolder.is_empty() {
+            base_dir
+        } else {
+            base_dir.join(&self.options.output_subfolder)
         };
 
         output_dir.join(format!("{stem}{suffix}.{ext}"))
